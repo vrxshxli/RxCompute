@@ -1,7 +1,10 @@
 import React from 'react';
 import { Activity, Pill, Stethoscope } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 
 const Hero = () => {
+  const navigate = useNavigate();
+
   return (
     <section className="relative pt-32 pb-20 px-6 overflow-hidden">
       <div className="absolute inset-0 bg-gradient-to-br from-emerald-50 via-white to-teal-50 -z-10"></div>
@@ -28,7 +31,10 @@ const Hero = () => {
         </p>
         
         <div className="flex flex-col sm:flex-row gap-4 justify-center mb-12">
-          <button className="px-8 py-4 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-lg font-semibold text-lg hover:shadow-xl hover:shadow-emerald-500/30 transition-all transform hover:scale-105 flex items-center justify-center gap-2">
+          <button 
+            onClick={() => navigate('/login')}
+            className="px-8 py-4 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-lg font-semibold text-lg hover:shadow-xl hover:shadow-emerald-500/30 transition-all transform hover:scale-105 flex items-center justify-center gap-2"
+          >
             <Pill className="w-5 h-5" />
             Start Free Trial
           </button>

@@ -1,14 +1,19 @@
 import React, { useState } from 'react';
 import { Pill, Menu, X } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 
 const Navbar = ({ scrolled }) => {
   const [menuOpen, setMenuOpen] = useState(false);
+  const navigate = useNavigate();
 
   return (
     <header className={`fixed top-0 w-full z-50 transition-all duration-300 ${scrolled ? 'bg-white/95 backdrop-blur-md shadow-lg' : 'bg-white/80 backdrop-blur-sm'}`}>
       <div className="container mx-auto px-6 py-4">
         <div className="flex justify-between items-center">
-          <div className="flex items-center gap-3">
+          <div 
+            onClick={() => navigate('/')}
+            className="flex items-center gap-3 cursor-pointer"
+          >
             <div className="w-12 h-12 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-xl flex items-center justify-center shadow-lg">
               <Pill className="w-6 h-6 text-white" />
             </div>
@@ -24,7 +29,10 @@ const Navbar = ({ scrolled }) => {
             <a href="#features" className="text-gray-700 hover:text-emerald-600 font-medium transition">Features</a>
             <a href="#how" className="text-gray-700 hover:text-emerald-600 font-medium transition">How It Works</a>
             <a href="#tech" className="text-gray-700 hover:text-emerald-600 font-medium transition">Technology</a>
-            <button className="px-6 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-lg font-medium hover:shadow-lg transition">
+            <button 
+              onClick={() => navigate('/login')}
+              className="px-6 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-lg font-medium hover:shadow-lg transition"
+            >
               Get Started
             </button>
           </nav>
@@ -39,7 +47,10 @@ const Navbar = ({ scrolled }) => {
             <a href="#features" className="text-gray-700 hover:text-emerald-600 font-medium">Features</a>
             <a href="#how" className="text-gray-700 hover:text-emerald-600 font-medium">How It Works</a>
             <a href="#tech" className="text-gray-700 hover:text-emerald-600 font-medium">Technology</a>
-            <button className="px-6 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-lg font-medium w-full">
+            <button 
+              onClick={() => navigate('/login')}
+              className="px-6 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-lg font-medium w-full"
+            >
               Get Started
             </button>
           </nav>
