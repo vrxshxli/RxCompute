@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "pharmagent-ai",
+  "private_key_id": "914b0b04c15aa4e22c0db33cd0c78ed2ed5b81e3",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEuwIBADANBgkqhkiG9w0BAQEFAASCBKUwggShAgEAAoIBAQDAI7YCn2Z/v/aD\nJekTicWUS68guMv7nsfA1VopT6RqvTJbWxy841CvWIRC6lIRWqVfAu1JR3GLlySX\nFTXWb/EiX78mLu5PL/Tb3wVa2vOzbCwASkDDxe/rGuYRRU+bK3/t9CNF3TQvb5sw\nb3R6CIKDOV7lMLgZWnNwnutBfUlDSjfmLSXexq6eNFzkazvt3Lrq3HXusmjDpgnF\nlyCPOH1uOQxEaYrIa5CIH3B9jQ1g1N9gTcRx9kqRqwLL6flc6a6Kx45UH7m6ddMy\nqeJZ/ZtGU4I1TafAjZKxLi91uUoxwupOJ7lWhE9n8r5RR8m6qSTR5ykmrUFXqIIM\nHieDrWYBAgMBAAECgf8qTDJB+uFPokIcYPjMdPnqnuFbbL3LE2CaEjMaVmQK82zl\n26BEnNjNoR43X5TYKS0FRi8CgMMoSF+lEDryjWDM1mh4JBYQ7K0Ux3tK+FnJ1+MK\niqNzSwcj/0ntPLrnnU3juRPCyjg2G8r9gKu9lFNW8VxIoXmwayRwAywlwJ+jkON1\nUjVH/pbpoKT+JPcBxk4MwRv7EWyWXP4GRPetbllCRzXgLWqY8MBDRE+aly7N2S2x\ny/2Rr6cycRjantMEIsUo4cPk28rfLrfw3RO4BNBc1xPnO9MjY9molkIzsKiL0VFG\nSP6+RjDnkUZCE6efuLmBY23DniXaJ5qKNsuD6IECgYEA478pNjvaE8EPDqT9Bg3C\nzakn5kmxPab8H6pjOWooP1Vb+zHDf47qKPhx/ZsiDa1Ogo+lZmywx0UwglCrlx/e\niTCv3RYSI/e2QI2BmgABxL1/SR/B+XDqLsRYVDABEXFWElb0+Hf7DUbus9zwcQyz\n7ZcZyi/j70iUssOkS3tOtIECgYEA1/m5/d0UcSxW7kkYi5D2hkZYdMnmMRDglURg\nBwql30kDP89RABlCHpvpKPJQhgeJnKchWI+nX6eznWjIoOfH8Zq/WTVyY1mmwivX\nNJa65lIv5kLSUcicnfzmsw2lE9jqGPmna5qngkKq0JWwl7q9QLP6U2xxcwis7c5i\ngFGX8YECgYBzRosBnIHhhdKtQu2fZs+3cWt0sNA5uI/dJ01Z/lWo2PfZyXJ+2kPD\nwR1RlHhEG/ilNTgvA8zm0Cqhi1uO/t6Q6kfZzBYahoOFYRq8bEx43MHUrXJtY63l\nRhS/aBziS0+ZsNIGAhTcv46LE8XQMvHPzK+NG3hv4XkCkuxSGHPaAQKBgGsnAAse\nm5zGtd6FL4NXCah20D4pSWbAi9wiz03PD5qnO9B1yCc3YOGU0uo4xpCovrKVDOtG\nYnEH4ApRyXBjboTFFPhqlvUJrr2ZSK1Ttyi8T/1626Qt1t5fcgoV0/fz37lCa7js\nQv1SnDLegX3V7T1jzeeD3wmGnV1izuYBFVSBAoGBAIMhyndSNnXahmbt+2gh6dUU\nahh3DpVr6ss4ZZTdMVPSITYbj8aT9GFwzWebqF/kM8jsPj7FDbQTqkhhllOZit/O\nUNIl5NuDn8hHovhhHsx08VaVkJGW/axTW82zAr7M8Ab8uwKVfh4KJHcF4gP6sDsK\n9DeEIRVpr8ViA/Jkaet0\n-----END PRIVATE KEY-----\n",
+  "client_email": "firebase-adminsdk-fbsvc@pharmagent-ai.iam.gserviceaccount.com",
+  "client_id": "100815017619231871335",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/firebase-adminsdk-fbsvc%40pharmagent-ai.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}

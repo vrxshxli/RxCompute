@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import { Pill, Phone, ArrowLeft, User, Mail, MapPin, Upload, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { initializeApp } from 'firebase/app';
+import { getAuth, GoogleAuthProvider, signInWithPopup, RecaptchaVerifier, signInWithPhoneNumber } from 'firebase/auth';
 
 const Signup = () => {
   const navigate = useNavigate();
@@ -14,6 +16,28 @@ const Signup = () => {
     phone: '',
     address: ''
   });
+  const [confirmationResult, setConfirmationResult] = useState(null);
+  const [errorMsg, setErrorMsg] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  // FastAPI backend base URL
+  const API_BASE = 'http://127.0.0.1:8000';
+
+  // Firebase client config (frontend)
+  const firebaseConfig = {
+    apiKey: 'AIzaSyAKbCaK-IBkfVVBejk3GPq5qNdsT7T6VtA',
+    authDomain: 'pharmagent-ai.firebaseapp.com',
+    projectId: 'pharmagent-ai',
+    storageBucket: 'pharmagent-ai.firebasestorage.app',
+    messagingSenderId: '1057060503974',
+    appId: '1:1057060503974:web:7008325a96829d24f28f67',
+    measurementId: 'G-H1Z7DS5LK6'
+  };
+
+  // Initialize Firebase
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  const provider = new GoogleAuthProvider();
 
   const handleChange = (e) => {
     setFormData({
@@ -33,10 +57,97 @@ const Signup = () => {
     }
   };
 
-  const handleSubmitDetails = (e) => {
+  // Send OTP via Firebase Phone Auth
+  const handleSubmitDetails = async (e) => {
     e.preventDefault();
-    console.log('Sending OTP to:', formData.phone);
-    setStep(2);
+    try {
+      setErrorMsg('');
+      setLoading(true);
+      // Normalize number to include country code (default +91 if not provided)
+      let num = (formData.phone || '').trim();
+      if (!num.startsWith('+')) num = '+91' + num.replace(/^0+/, '');
+
+      // Ensure visible reCAPTCHA exists (easier to debug). Later can switch to invisible.
+      if (window.recaptchaVerifier?.clear) {
+        // clear previous instance if any
+        window.recaptchaVerifier.clear();
+      }
+      window.recaptchaVerifier = new RecaptchaVerifier(auth, 'signup-recaptcha', { size: 'normal' });
+      const appVerifier = window.recaptchaVerifier;
+
+      console.log('Sending OTP to:', num);
+      const result = await signInWithPhoneNumber(auth, num, appVerifier);
+      setConfirmationResult(result);
+      setStep(2);
+    } catch (err) {
+      console.error(err);
+      setErrorMsg(err.message || 'Failed to send OTP');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Confirm OTP and verify with backend
+  const handleVerifyAndSignup = async (e) => {
+    e.preventDefault();
+    try {
+      setErrorMsg('');
+      setLoading(true);
+      const otpCode = otp.join('');
+      if (!confirmationResult) throw new Error('OTP session expired. Please resend OTP.');
+      const cred = await confirmationResult.confirm(otpCode);
+      const idToken = await cred.user.getIdToken();
+
+      const res = await fetch(`${API_BASE}/auth/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || err.detail || `Verify failed (${res.status})`);
+      }
+      const data = await res.json();
+      localStorage.setItem('app_token', data.token);
+      // After signup, go to login (or role-based dashboard if you prefer)
+      navigate('/login');
+    } catch (err) {
+      console.error(err);
+      setErrorMsg(err.message || 'OTP verification failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Google signup  backend verify  token
+  const handleGoogleSignup = async () => {
+    try {
+      setErrorMsg('');
+      setLoading(true);
+      console.log('Google signup initiated');
+      const result = await signInWithPopup(auth, provider);
+      const idToken = await result.user.getIdToken();
+
+      const res = await fetch(`${API_BASE}/auth/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || err.detail || `Verify failed (${res.status})`);
+      }
+
+      const data = await res.json();
+      localStorage.setItem('app_token', data.token);
+      navigate('/login');
+    } catch (e) {
+      console.error('Google signup error:', e);
+      setErrorMsg(e.message || 'Signup failed');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleOtpChange = (index, value) => {
@@ -44,24 +155,12 @@ const Signup = () => {
       const newOtp = [...otp];
       newOtp[index] = value;
       setOtp(newOtp);
-      
+
       if (value && index < 5) {
-        document.getElementById(`signup-otp-${index + 1}`).focus();
+        const next = document.getElementById(`signup-otp-${index + 1}`);
+        if (next) next.focus();
       }
     }
-  };
-
-  const handleVerifyAndSignup = (e) => {
-    e.preventDefault();
-    const otpCode = otp.join('');
-    console.log('Creating account with:', { ...formData, otp: otpCode });
-    // Account creation logic
-    // navigate('/dashboard');
-  };
-
-  const handleGoogleSignup = () => {
-    console.log('Google signup initiated');
-    // Google OAuth logic
   };
 
   return (
@@ -91,12 +190,18 @@ const Signup = () => {
             <p className="text-gray-600">Join PharmAgent AI today</p>
           </div>
 
+          {/* Error Banner */}
+          {errorMsg && (
+            <div className="mb-4 px-4 py-3 bg-red-100 text-red-700 rounded">{errorMsg}</div>
+          )}
+
           {step === 1 && (
             <>
               {/* Google Signup Button */}
               <button 
                 onClick={handleGoogleSignup}
                 className="w-full py-3 px-4 border-2 border-gray-300 rounded-lg hover:bg-gray-50 transition flex items-center justify-center gap-3 mb-6 hover:border-emerald-500 group"
+                disabled={loading}
               >
                 <svg className="w-6 h-6" viewBox="0 0 24 24">
                   <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
@@ -115,6 +220,11 @@ const Signup = () => {
                 <div className="relative flex justify-center text-sm">
                   <span className="px-4 bg-white text-gray-500">Or sign up with details</span>
                 </div>
+              </div>
+
+              {/* reCAPTCHA (visible for debug) */}
+              <div className="mb-4">
+                <div id="signup-recaptcha"></div>
               </div>
 
               {/* Signup Form */}
@@ -250,9 +360,10 @@ const Signup = () => {
 
                 <button
                   type="submit"
-                  className="w-full py-3 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-lg font-semibold hover:shadow-xl hover:shadow-emerald-500/30 transition-all transform hover:scale-[1.02]"
+                  disabled={loading}
+                  className="w-full py-3 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-lg font-semibold hover:shadow-xl hover:shadow-emerald-500/30 transition-all transform hover:scale-[1.02] disabled:opacity-60"
                 >
-                  Continue
+                  {loading ? 'Sending OTP...' : 'Continue'}
                 </button>
               </form>
             </>
@@ -281,17 +392,18 @@ const Signup = () => {
 
               <button
                 type="submit"
-                className="w-full py-3 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-lg font-semibold hover:shadow-xl hover:shadow-emerald-500/30 transition-all transform hover:scale-[1.02]"
+                disabled={loading}
+                className="w-full py-3 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-lg font-semibold hover:shadow-xl hover:shadow-emerald-500/30 transition-all transform hover:scale-[1.02] disabled:opacity-60"
               >
-                Create Account
+                {loading ? 'Verifying...' : 'Create Account'}
               </button>
 
               <button
                 type="button"
-                onClick={() => console.log('Resending OTP')}
+                onClick={() => setStep(1)}
                 className="w-full text-emerald-600 hover:text-emerald-700 font-medium text-sm"
               >
-                Resend OTP
+                Change phone number
               </button>
             </form>
           )}
@@ -311,7 +423,7 @@ const Signup = () => {
         {/* Trust Badge */}
         <div className="mt-6 text-center">
           <p className="text-sm text-gray-500">
-            🔒 Your data is secure with 256-bit encryption
+             Your data is secure with 256-bit encryption
           </p>
         </div>
       </div>

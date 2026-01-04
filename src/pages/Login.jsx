@@ -1,18 +1,60 @@
 import React, { useState } from 'react';
 import { Pill, Phone, ArrowLeft, Mail } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { initializeApp } from 'firebase/app';
+import { getAuth, GoogleAuthProvider, signInWithPopup, RecaptchaVerifier, signInWithPhoneNumber } from 'firebase/auth';
 
 const Login = () => {
   const navigate = useNavigate();
   const [phoneNumber, setPhoneNumber] = useState('');
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const [showOtpInput, setShowOtpInput] = useState(false);
+  const [confirmationResult, setConfirmationResult] = useState(null);
+  const [errorMsg, setErrorMsg] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const handleSendOtp = (e) => {
+  // FastAPI backend base URL
+  const API_BASE = 'http://127.0.0.1:8000';
+
+  // Firebase client config (frontend)
+  const firebaseConfig = {
+    apiKey: 'AIzaSyAKbCaK-IBkfVVBejk3GPq5qNdsT7T6VtA',
+    authDomain: 'pharmagent-ai.firebaseapp.com',
+    projectId: 'pharmagent-ai',
+    storageBucket: 'pharmagent-ai.firebasestorage.app',
+    messagingSenderId: '1057060503974',
+    appId: '1:1057060503974:web:7008325a96829d24f28f67',
+    measurementId: 'G-H1Z7DS5LK6'
+  };
+
+  // Initialize Firebase once
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  const provider = new GoogleAuthProvider();
+
+  const handleSendOtp = async (e) => {
     e.preventDefault();
-    // OTP send logic yahan
-    console.log('Sending OTP to:', phoneNumber);
-    setShowOtpInput(true);
+    try {
+      setErrorMsg('');
+      setLoading(true);
+      // Ensure number has country code (assume India +91 if not provided)
+      let num = phoneNumber.trim();
+      if (!num.startsWith('+')) num = '+91' + num.replace(/^0+/, '');
+
+      if (!window.recaptchaVerifier) {
+        window.recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', { size: 'invisible' });
+      }
+      const appVerifier = window.recaptchaVerifier;
+      console.log('Sending OTP to:', num);
+      const result = await signInWithPhoneNumber(auth, num, appVerifier);
+      setConfirmationResult(result);
+      setShowOtpInput(true);
+    } catch (err) {
+      console.error(err);
+      setErrorMsg(err.message || 'Failed to send OTP');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleOtpChange = (index, value) => {
@@ -28,17 +70,66 @@ const Login = () => {
     }
   };
 
-  const handleVerifyOtp = (e) => {
+  const handleVerifyOtp = async (e) => {
     e.preventDefault();
-    const otpCode = otp.join('');
-    console.log('Verifying OTP:', otpCode);
-    // Verification logic yahan
-    // navigate('/dashboard');
+    try {
+      setErrorMsg('');
+      setLoading(true);
+      const otpCode = otp.join('');
+      if (!confirmationResult) throw new Error('OTP session expired. Please resend OTP.');
+      const credResult = await confirmationResult.confirm(otpCode);
+      const idToken = await credResult.user.getIdToken();
+      const res = await fetch(`${API_BASE}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || err.detail || `Login failed (${res.status})`);
+      }
+      const data = await res.json();
+      localStorage.setItem('app_token', data.token);
+      const role = (data.user && data.user.role) || 'user';
+      redirectByRole(role);
+    } catch (err) {
+      console.error(err);
+      setErrorMsg(err.message || 'OTP verification failed');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleGoogleLogin = () => {
-    console.log('Google login initiated');
-    // Google OAuth logic yahan
+  const redirectByRole = (role) => {
+    if (role === 'admin') navigate('/dashboard/admin');
+    else if (role === 'warehouse') navigate('/dashboard/warehouse');
+    else if (role === 'pharmacist') navigate('/dashboard/pharmacist');
+    else navigate('/dashboard/user');
+  };
+
+  const handleGoogleLogin = async () => {
+    try {
+      console.log('Google login initiated');
+      const result = await signInWithPopup(auth, provider);
+      const idToken = await result.user.getIdToken();
+
+      const res = await fetch(`${API_BASE}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || err.detail || `Login failed (${res.status})`);
+      }
+      const data = await res.json();
+      localStorage.setItem('app_token', data.token);
+      const role = (data.user && data.user.role) || 'user';
+      redirectByRole(role);
+    } catch (e) {
+      console.error('Google login error:', e);
+      alert(e.message || 'Login failed');
+    }
   };
 
   return (
@@ -68,6 +159,11 @@ const Login = () => {
             <p className="text-gray-600">Sign in to your PharmAgent account</p>
           </div>
 
+          {/* Error Banner */}
+          {errorMsg && (
+            <div className="mb-4 px-4 py-3 bg-red-100 text-red-700 rounded">{errorMsg}</div>
+          )}
+
           {/* Google Login Button */}
           <button 
             onClick={handleGoogleLogin}
@@ -92,6 +188,9 @@ const Login = () => {
             </div>
           </div>
 
+          {/* reCAPTCHA container (invisible) */}
+          <div id="recaptcha-container" />
+
           {/* Phone Login Form */}
           {!showOtpInput ? (
             <form onSubmit={handleSendOtp} className="space-y-6">
@@ -114,9 +213,10 @@ const Login = () => {
 
               <button
                 type="submit"
-                className="w-full py-3 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-lg font-semibold hover:shadow-xl hover:shadow-emerald-500/30 transition-all transform hover:scale-[1.02]"
+                disabled={loading}
+                className="w-full py-3 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-lg font-semibold hover:shadow-xl hover:shadow-emerald-500/30 transition-all transform hover:scale-[1.02] disabled:opacity-60"
               >
-                Send OTP
+                {loading ? 'Sending OTP...' : 'Send OTP'}
               </button>
             </form>
           ) : (
@@ -142,9 +242,10 @@ const Login = () => {
 
               <button
                 type="submit"
-                className="w-full py-3 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-lg font-semibold hover:shadow-xl hover:shadow-emerald-500/30 transition-all transform hover:scale-[1.02]"
+                disabled={loading}
+                className="w-full py-3 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-lg font-semibold hover:shadow-xl hover:shadow-emerald-500/30 transition-all transform hover:scale-[1.02] disabled:opacity-60"
               >
-                Verify OTP
+                {loading ? 'Verifying...' : 'Verify OTP'}
               </button>
 
               <button
