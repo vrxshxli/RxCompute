@@ -1,15 +1,24 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+import os
 from .auth import router as auth_router
 from .dashboard import router as dashboard_router
 from .dashboard_user import router as user_dashboard_router
 
 app = FastAPI(title="PharmaForge Auth API (FastAPI)")
 
-# Enable permissive CORS for development
+# CORS configuration (env-driven)
+# Set ALLOWED_ORIGINS as a comma-separated list in production, e.g.:
+# ALLOWED_ORIGINS=https://yourapp.vercel.app,https://pharmaforge-api.onrender.com
+allowed_origins_env = os.getenv(
+    "ALLOWED_ORIGINS",
+    "http://localhost:5173,http://127.0.0.1:5173,http://192.168.220.1:5173"
+).strip()
+allowed_origins = [o.strip() for o in allowed_origins_env.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

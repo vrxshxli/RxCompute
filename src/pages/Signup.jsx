@@ -1,4 +1,4 @@
-﻿import React, { useState } from 'react';
+import React, { useState } from 'react';
 import { Pill, Phone, ArrowLeft, User, Mail, MapPin, Upload, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { initializeApp } from 'firebase/app';
@@ -21,7 +21,7 @@ const Signup = () => {
   const [loading, setLoading] = useState(false);
 
   // FastAPI backend base URL
-  const API_BASE = 'http://127.0.0.1:8000';
+  const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
 
   // Firebase client config (frontend)
   const firebaseConfig = {

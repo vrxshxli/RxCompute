@@ -1,0 +1,6 @@
+# Rename this file to key.properties and fill in your values.
+# Store this file outside git (add to .gitignore)
+storeFile=../../release-keystore.jks
+storePassword=CHANGE_ME_STRONG_PASSWORD
+keyAlias=rxcompute
+keyPassword=CHANGE_ME_STRONG_PASSWORD
