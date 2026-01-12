@@ -5,6 +5,7 @@ from app.auth import router as auth_router
 from app.dashboard import router as dashboard_router
 from app.dashboard_user import router as user_dashboard_router
 
+from app.ai import router as ai_router
 app = FastAPI(title="PharmaForge Auth API (FastAPI)")
 
 # CORS configuration (env-driven)
@@ -31,3 +32,4 @@ async def health():
 app.include_router(auth_router)
 app.include_router(dashboard_router)
 app.include_router(user_dashboard_router)
+app.include_router(ai_router)
