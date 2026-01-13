@@ -11,7 +11,7 @@ const Footer = () => {
               <Pill className="w-5 h-5 text-white" />
             </div>
             <div>
-              <div className="font-bold text-lg">PharmAgent AI</div>
+              <div className="font-bold text-lg">RxCompute</div>
               <div className="text-sm text-gray-400">Team Invaders</div>
             </div>
           </div>

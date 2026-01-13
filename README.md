@@ -1,8 +1,8 @@
-# 💊 PharmAgent AI - Intelligent Pharmacy Management System
+# 💊 RxCompute - Intelligent Pharmacy Management System
 
 <div align="center">
 
-![PharmAgent AI](https://img.shields.io/badge/PharmAgent-AI%20Powered-10b981?style=for-the-badge&logo=react&logoColor=white)
+![RxCompute](https://img.shields.io/badge/PharmAgent-AI%20Powered-10b981?style=for-the-badge&logo=react&logoColor=white)
 [![React](https://img.shields.io/badge/React-18.3-61DAFB?style=for-the-badge&logo=react&logoColor=white)](https://reactjs.org/)
 [![Vite](https://img.shields.io/badge/Vite-5.4-646CFF?style=for-the-badge&logo=vite&logoColor=white)](https://vitejs.dev/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind-3.4-06B6D4?style=for-the-badge&logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
@@ -15,7 +15,7 @@
 
 ---
 
-![PharmAgent AI Landing Page](https://via.placeholder.com/1200x600/10b981/ffffff?text=PharmAgent+AI+Landing+Page)
+![RxCompute Landing Page](https://via.placeholder.com/1200x600/10b981/ffffff?text=PharmAgent+AI+Landing+Page)
 
 *Modern, responsive, and intuitive pharmacy management interface*
 
@@ -42,7 +42,7 @@
 
 ## 🌟 Overview
 
-**PharmAgent AI** is a revolutionary agentic AI system that acts as an expert pharmacist, designed specifically for the **Hackfusion Challenge 2025**. It seamlessly handles natural conversations, predicts medicine refill needs, enforces prescription safety rules, and autonomously executes backend operations with minimal human intervention.
+**RxCompute** is a revolutionary agentic AI system that acts as an expert pharmacist, designed specifically for the **Hackfusion Challenge 2025**. It seamlessly handles natural conversations, predicts medicine refill needs, enforces prescription safety rules, and autonomously executes backend operations with minimal human intervention.
 
 ### 🎯 Problem Statement
 
@@ -644,7 +644,7 @@ This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) 
 ```
 MIT License
 
-Copyright (c) 2025 PharmAgent AI Team
+Copyright (c) 2025 RxCompute Team
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -780,7 +780,7 @@ Future enhancements planned:
 
 ## 🏆 Hackfusion Challenge Submission
 
-**Project Name:** PharmAgent AI  
+**Project Name:** RxCompute  
 **Category:** Agentic AI System  
 **Challenge:** Hackfusion 2025  
 **Submission Date:** January 2025  
@@ -807,6 +807,6 @@ Future enhancements planned:
 
 ---
 
-**© 2025 PharmAgent AI Team. All Rights Reserved.**
+**© 2025 RxCompute Team. All Rights Reserved.**
 
 </div>

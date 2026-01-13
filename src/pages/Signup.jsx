@@ -187,7 +187,7 @@ const Signup = () => {
               <Pill className="w-8 h-8 text-white" />
             </div>
             <h1 className="text-3xl font-bold text-gray-900 mb-2">Create Account</h1>
-            <p className="text-gray-600">Join PharmAgent AI today</p>
+            <p className="text-gray-600">Join RxCompute today</p>
           </div>
 
           {/* Error Banner */}
