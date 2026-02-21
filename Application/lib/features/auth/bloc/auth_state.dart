@@ -9,22 +9,23 @@ class AuthInitial extends AuthState {}
 
 class AuthLoading extends AuthState {}
 
-class OtpSentState extends AuthState {
-  final String mockOtp;
-  final String phone;
-  OtpSentState({required this.mockOtp, required this.phone});
-
-  @override
-  List<Object?> get props => [mockOtp, phone];
-}
-
-class OtpVerifiedState extends AuthState {
+class GoogleSignInSuccess extends AuthState {
   final int userId;
   final bool isRegistered;
-  OtpVerifiedState({required this.userId, required this.isRegistered});
+  final String? name;
+  final String? email;
+  final String? profilePicture;
+
+  GoogleSignInSuccess({
+    required this.userId,
+    required this.isRegistered,
+    this.name,
+    this.email,
+    this.profilePicture,
+  });
 
   @override
-  List<Object?> get props => [userId, isRegistered];
+  List<Object?> get props => [userId, isRegistered, name, email, profilePicture];
 }
 
 class RegisteredState extends AuthState {}

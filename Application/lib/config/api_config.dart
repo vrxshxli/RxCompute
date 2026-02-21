@@ -11,6 +11,7 @@ class ApiConfig {
   static const String baseUrl = 'https://rxcompute-api.onrender.com';
 
   // Auth
+  static const String googleAuth = '/auth/google';
   static const String sendOtp = '/auth/send-otp';
   static const String verifyOtp = '/auth/verify-otp';
 

@@ -1,5 +1,10 @@
+import os
+import json
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+import firebase_admin
+from firebase_admin import credentials
 
 from database import Base, engine
 from routers import (
@@ -9,6 +14,20 @@ from routers import (
     orders_router,
     notifications_router,
 )
+
+# ─── Initialize Firebase Admin SDK ────────────────────────
+if not firebase_admin._apps:
+    # Option 1: GOOGLE_APPLICATION_CREDENTIALS env var (file path)
+    # Option 2: FIREBASE_SERVICE_ACCOUNT env var (JSON string — best for Render)
+    firebase_sa = os.getenv("FIREBASE_SERVICE_ACCOUNT")
+    if firebase_sa:
+        cred = credentials.Certificate(json.loads(firebase_sa))
+        firebase_admin.initialize_app(cred)
+    elif os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
+        firebase_admin.initialize_app()
+    else:
+        # Default init (works in GCP environments)
+        firebase_admin.initialize_app()
 
 # Create all tables
 Base.metadata.create_all(bind=engine)

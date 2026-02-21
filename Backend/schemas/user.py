@@ -22,11 +22,13 @@ class UserUpdate(BaseModel):
 
 class UserOut(BaseModel):
     id: int
-    phone: str
+    phone: str | None
+    google_id: str | None = None
     name: str | None
     age: int | None
     gender: str | None
     email: str | None
+    profile_picture: str | None = None
     allergies: str | None
     conditions: str | None
     is_verified: bool

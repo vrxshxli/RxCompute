@@ -26,3 +26,5 @@ services:
         generateValue: true
       - key: PYTHON_VERSION
         value: "3.11.9"
+      - key: FIREBASE_SERVICE_ACCOUNT
+        sync: false  # Set manually in Render dashboard (paste service account JSON)

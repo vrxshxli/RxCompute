@@ -22,8 +22,22 @@ class _RegS extends State<RegistrationScreen> {
   final _al = TextEditingController();
   String? _g;
   final Set<String> _cond = {};
+  bool _prefilled = false;
 
   bool get _ok => _n.text.length >= 2 && _a.text.isNotEmpty && _g != null;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_prefilled) {
+      final args = ModalRoute.of(context)?.settings.arguments;
+      if (args is Map<String, dynamic>) {
+        if (args['name'] != null && _n.text.isEmpty) _n.text = args['name'];
+        if (args['email'] != null && _e.text.isEmpty) _e.text = args['email'];
+      }
+      _prefilled = true;
+    }
+  }
 
   @override
   void dispose() {
@@ -75,8 +89,13 @@ class _RegS extends State<RegistrationScreen> {
                 padding: const EdgeInsets.symmetric(horizontal: 28),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   const SizedBox(height: 32),
-                  Text('Create Your', style: GoogleFonts.dmSerifDisplay(color: r.text1, fontSize: 32)),
+                  Text('Complete Your', style: GoogleFonts.dmSerifDisplay(color: r.text1, fontSize: 32)),
                   Text('Profile', style: GoogleFonts.dmSerifDisplay(color: C.compute, fontSize: 32)),
+                  const SizedBox(height: 8),
+                  Text(
+                    'WE NEED A FEW DETAILS TO KEEP YOU SAFE',
+                    style: GoogleFonts.outfit(color: r.text3, fontSize: 11, fontWeight: FontWeight.w600, letterSpacing: 1.5),
+                  ),
                   const SizedBox(height: 32),
                   RxInput(label: 'Full Name', hint: 'Enter your full name', ctrl: _n, onChange: (_) => setState(() {})),
                   const SizedBox(height: 20),

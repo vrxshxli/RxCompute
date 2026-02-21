@@ -9,33 +9,29 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
   AuthBloc({AuthRepository? repository})
       : _repo = repository ?? AuthRepository(),
         super(AuthInitial()) {
-    on<SendOtpEvent>(_onSendOtp);
-    on<VerifyOtpEvent>(_onVerifyOtp);
+    on<GoogleSignInEvent>(_onGoogleSignIn);
     on<RegisterEvent>(_onRegister);
     on<LogoutEvent>(_onLogout);
     on<CheckAuthEvent>(_onCheckAuth);
   }
 
-  Future<void> _onSendOtp(SendOtpEvent event, Emitter<AuthState> emit) async {
+  Future<void> _onGoogleSignIn(GoogleSignInEvent event, Emitter<AuthState> emit) async {
     emit(AuthLoading());
     try {
-      final otp = await _repo.sendOtp(event.phone);
-      emit(OtpSentState(mockOtp: otp, phone: event.phone));
-    } catch (e) {
-      emit(AuthError('Failed to send OTP: ${e.toString()}'));
-    }
-  }
-
-  Future<void> _onVerifyOtp(VerifyOtpEvent event, Emitter<AuthState> emit) async {
-    emit(AuthLoading());
-    try {
-      final data = await _repo.verifyOtp(event.phone, event.otp);
-      emit(OtpVerifiedState(
+      final data = await _repo.signInWithGoogle();
+      if (data == null) {
+        emit(AuthInitial()); // User cancelled
+        return;
+      }
+      emit(GoogleSignInSuccess(
         userId: data['user_id'],
         isRegistered: data['is_registered'] ?? false,
+        name: data['name'],
+        email: data['email'],
+        profilePicture: data['profile_picture'],
       ));
     } catch (e) {
-      emit(AuthError('Invalid OTP'));
+      emit(AuthError('Google Sign-In failed: ${e.toString()}'));
     }
   }
 

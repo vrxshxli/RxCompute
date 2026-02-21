@@ -8,11 +8,13 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
-    phone = Column(String(20), unique=True, nullable=False, index=True)
+    phone = Column(String(20), unique=True, nullable=True, index=True)
+    google_id = Column(String(255), unique=True, nullable=True, index=True)
     name = Column(String(100), nullable=True)
     age = Column(Integer, nullable=True)
     gender = Column(String(10), nullable=True)
     email = Column(String(150), nullable=True)
+    profile_picture = Column(Text, nullable=True)
     allergies = Column(Text, nullable=True)       # comma-separated
     conditions = Column(Text, nullable=True)       # comma-separated
     is_verified = Column(Boolean, default=False)
