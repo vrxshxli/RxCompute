@@ -45,7 +45,7 @@ class RxApp extends StatelessWidget {
         BlocProvider(create: (_) => ChatBloc()..add(LoadChatEvent())),
         BlocProvider(create: (_) => MedicineBloc()..add(LoadMedicinesEvent())),
         BlocProvider(create: (_) => OrderBloc()..add(LoadOrdersEvent())),
-        BlocProvider(create: (_) => ProfileBloc()..add(LoadProfileEvent())),
+        BlocProvider(create: (_) => ProfileBloc()),
       ],
       child: BlocBuilder<ThemeBloc, ThemeState>(
         builder: (context, themeState) {

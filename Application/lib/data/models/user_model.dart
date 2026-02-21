@@ -1,10 +1,12 @@
 class UserModel {
   final int id;
-  final String phone;
+  final String? phone;
+  final String? googleId;
   final String? name;
   final int? age;
   final String? gender;
   final String? email;
+  final String? profilePicture;
   final String? allergies;
   final String? conditions;
   final bool isVerified;
@@ -12,11 +14,13 @@ class UserModel {
 
   const UserModel({
     required this.id,
-    required this.phone,
+    this.phone,
+    this.googleId,
     this.name,
     this.age,
     this.gender,
     this.email,
+    this.profilePicture,
     this.allergies,
     this.conditions,
     this.isVerified = false,
@@ -26,10 +30,12 @@ class UserModel {
   factory UserModel.fromJson(Map<String, dynamic> json) => UserModel(
         id: json['id'],
         phone: json['phone'],
+        googleId: json['google_id'],
         name: json['name'],
         age: json['age'],
         gender: json['gender'],
         email: json['email'],
+        profilePicture: json['profile_picture'],
         allergies: json['allergies'],
         conditions: json['conditions'],
         isVerified: json['is_verified'] ?? false,
@@ -50,7 +56,9 @@ class UserModel {
   String get initials {
     if (name == null || name!.isEmpty) return '??';
     final p = name!.split(' ');
-    return p.length >= 2 ? '${p[0][0]}${p[1][0]}' : name!.substring(0, 2);
+    return p.length >= 2
+        ? '${p[0][0].toUpperCase()}${p[1][0].toUpperCase()}'
+        : name!.substring(0, 2).toUpperCase();
   }
 
   String get firstName => name?.split(' ').first ?? 'User';
