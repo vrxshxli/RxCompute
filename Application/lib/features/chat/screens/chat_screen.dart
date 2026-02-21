@@ -1,0 +1,407 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:google_fonts/google_fonts.dart';
+import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/rx_theme_ext.dart';
+import '../../../core/widgets/shared_widgets.dart';
+import '../../../config/routes.dart';
+import '../../../data/models/chat_models.dart';
+import '../../../data/models/medicine_model.dart';
+import '../../../data/mock_data.dart';
+import '../bloc/chat_bloc.dart';
+
+class ChatScreen extends StatefulWidget {
+  const ChatScreen({super.key});
+  @override
+  State<ChatScreen> createState() => _CS();
+}
+
+class _CS extends State<ChatScreen> {
+  final _tc = TextEditingController();
+  final _sc = ScrollController();
+
+  @override
+  void dispose() {
+    _tc.dispose();
+    _sc.dispose();
+    super.dispose();
+  }
+
+  void _send() {
+    final t = _tc.text.trim();
+    if (t.isEmpty) return;
+    context.read<ChatBloc>().add(SendMessageEvent(t));
+    _tc.clear();
+    _scrollEnd();
+  }
+
+  void _scrollEnd() => WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_sc.hasClients) _sc.animateTo(_sc.position.maxScrollExtent + 100, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+      });
+
+  @override
+  Widget build(BuildContext context) {
+    final r = context.rx;
+    return BlocConsumer<ChatBloc, ChatState>(
+      listener: (context, state) => _scrollEnd(),
+      builder: (context, state) {
+        return Scaffold(
+          backgroundColor: r.bg,
+          body: SafeArea(
+            child: Column(children: [
+              Container(
+                padding: const EdgeInsets.fromLTRB(20, 10, 20, 12),
+                decoration: BoxDecoration(color: r.bg, border: Border(bottom: BorderSide(color: r.border, width: 0.5))),
+                child: Row(children: [
+                  const RxLogo(size: 18),
+                  const SizedBox(width: 10),
+                  Container(width: 6, height: 6, decoration: const BoxDecoration(color: C.ok, shape: BoxShape.circle)),
+                  const SizedBox(width: 5),
+                  Text('ONLINE', style: GoogleFonts.outfit(color: C.ok, fontSize: 9, fontWeight: FontWeight.w700, letterSpacing: 1.5)),
+                  const Spacer(),
+                  Icon(Icons.more_horiz_rounded, color: r.text3, size: 20),
+                ]),
+              ),
+              Expanded(
+                child: ListView.builder(
+                  controller: _sc,
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                  itemCount: state.messages.length + (state.isTyping ? 1 : 0),
+                  itemBuilder: (_, i) => i == state.messages.length && state.isTyping ? _typB(r) : _build(state.messages[i], r),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                decoration: BoxDecoration(color: r.card, border: Border(top: BorderSide(color: r.border, width: 0.5))),
+                child: SafeArea(
+                  top: false,
+                  child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                    GestureDetector(
+                      onTap: () => context.read<ChatBloc>().add(ToggleRecordingEvent()),
+                      child: Container(
+                        width: 42,
+                        height: 42,
+                        decoration: BoxDecoration(color: state.isRecording ? C.rx : r.surface, borderRadius: BorderRadius.circular(12)),
+                        child: Icon(state.isRecording ? Icons.stop_rounded : Icons.mic_rounded, color: state.isRecording ? Colors.white : r.text1, size: 18),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Container(
+                        constraints: const BoxConstraints(maxHeight: 120),
+                        decoration: BoxDecoration(color: r.surface, borderRadius: BorderRadius.circular(20)),
+                        child: TextField(
+                          controller: _tc,
+                          maxLines: 4,
+                          minLines: 1,
+                          textInputAction: TextInputAction.send,
+                          onSubmitted: (_) => _send(),
+                          onChanged: (_) => setState(() {}),
+                          style: GoogleFonts.outfit(color: r.text1, fontSize: 14),
+                          decoration: InputDecoration(
+                            hintText: 'Type your message...',
+                            hintStyle: TextStyle(color: r.text3),
+                            border: InputBorder.none,
+                            enabledBorder: InputBorder.none,
+                            focusedBorder: InputBorder.none,
+                            filled: false,
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    GestureDetector(
+                      onTap: _tc.text.trim().isNotEmpty ? _send : null,
+                      child: Container(
+                        width: 42,
+                        height: 42,
+                        decoration: BoxDecoration(color: _tc.text.trim().isNotEmpty ? C.rx : r.surface, borderRadius: BorderRadius.circular(12)),
+                        child: Icon(Icons.arrow_upward_rounded, color: _tc.text.trim().isNotEmpty ? Colors.white : r.text3, size: 18),
+                      ),
+                    ),
+                  ]),
+                ),
+              ),
+            ]),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _av() => Container(
+        width: 26,
+        height: 26,
+        margin: const EdgeInsets.only(top: 2),
+        decoration: BoxDecoration(color: C.compute.withOpacity(context.rx.dark ? 0.12 : 0.06), borderRadius: BorderRadius.circular(8)),
+        child: Center(child: Text('Rx', style: GoogleFonts.dmSerifDisplay(color: C.compute, fontSize: 11))),
+      );
+
+  Widget _build(ChatMessage m, Rx r) {
+    if (m.isUser) return _uB(m, r);
+    switch (m.type) {
+      case ChatMessageType.meds:
+        return _medR(m, r);
+      case ChatMessageType.safety:
+        return _safR(m, r);
+      case ChatMessageType.confirmed:
+        return _ordR(m, r);
+      default:
+        return _aiB(m, r);
+    }
+  }
+
+  Widget _uB(ChatMessage m, Rx r) => Padding(
+        padding: const EdgeInsets.only(bottom: 18, left: 56),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: const BoxDecoration(color: C.rx, borderRadius: BorderRadius.only(topLeft: Radius.circular(16), topRight: Radius.circular(16), bottomLeft: Radius.circular(16), bottomRight: Radius.circular(4))),
+            child: Text(m.text, style: GoogleFonts.outfit(color: Colors.white, fontSize: 14, height: 1.5)),
+          ),
+          const SizedBox(height: 4),
+          Text(_ft(m.timestamp), style: TextStyle(color: r.text3, fontSize: 9)),
+        ]),
+      );
+
+  Widget _aiB(ChatMessage m, Rx r) => Padding(
+        padding: const EdgeInsets.only(bottom: 18, right: 44),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          _av(),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: r.card,
+                  borderRadius: const BorderRadius.only(topLeft: Radius.circular(4), topRight: Radius.circular(16), bottomLeft: Radius.circular(16), bottomRight: Radius.circular(16)),
+                  border: Border.all(color: r.border.withOpacity(0.4)),
+                ),
+                child: Text(m.text, style: GoogleFonts.outfit(color: r.text1, fontSize: 14, height: 1.5)),
+              ),
+              const SizedBox(height: 4),
+              Text(_ft(m.timestamp), style: TextStyle(color: r.text3, fontSize: 9)),
+            ]),
+          ),
+        ]),
+      );
+
+  Widget _typB(Rx r) => Padding(
+        padding: const EdgeInsets.only(bottom: 18, right: 44),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          _av(),
+          const SizedBox(width: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+            decoration: BoxDecoration(
+              color: r.card,
+              borderRadius: const BorderRadius.only(topLeft: Radius.circular(4), topRight: Radius.circular(16), bottomLeft: Radius.circular(16), bottomRight: Radius.circular(16)),
+            ),
+            child: const TypingDots(),
+          ),
+        ]),
+      );
+
+  Widget _medR(ChatMessage m, Rx r) => Padding(
+        padding: const EdgeInsets.only(bottom: 18, right: 20),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          _av(),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: r.card,
+                borderRadius: const BorderRadius.only(topLeft: Radius.circular(4), topRight: Radius.circular(16), bottomLeft: Radius.circular(16), bottomRight: Radius.circular(16)),
+                border: Border.all(color: r.border.withOpacity(0.4)),
+              ),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(m.text, style: GoogleFonts.outfit(color: r.text2, fontSize: 12, fontWeight: FontWeight.w600, letterSpacing: 0.5)),
+                const SizedBox(height: 14),
+                ...m.medicines!.map((med) => _MC(med: med)),
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(color: r.okBg, borderRadius: BorderRadius.circular(8)),
+                  child: Row(children: [
+                    Icon(Icons.check_circle_rounded, color: C.ok, size: 16),
+                    const SizedBox(width: 8),
+                    Text('ALL SAFETY CHECKS PASSED', style: GoogleFonts.outfit(color: C.ok, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.8)),
+                  ]),
+                ),
+                const SizedBox(height: 14),
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(color: r.surface, borderRadius: BorderRadius.circular(10)),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text('ORDER SUMMARY', style: GoogleFonts.outfit(color: r.text3, fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 1.5)),
+                    const SizedBox(height: 10),
+                    ...m.medicines!.map((med) => Padding(
+                          padding: const EdgeInsets.only(bottom: 6),
+                          child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                            Expanded(child: Text('${med.name} × ${med.quantity}', style: TextStyle(color: r.text2, fontSize: 13), overflow: TextOverflow.ellipsis)),
+                            Text(med.formattedPrice, style: TextStyle(color: r.text2, fontSize: 13)),
+                          ]),
+                        )),
+                    Container(height: 1, color: r.border, margin: const EdgeInsets.symmetric(vertical: 8)),
+                    Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                      Text('Total', style: GoogleFonts.dmSerifDisplay(color: r.text1, fontSize: 20)),
+                      Text('€${m.medicines!.fold<double>(0, (s, med) => s + med.price * med.quantity).toStringAsFixed(2)}', style: GoogleFonts.dmSerifDisplay(color: r.text1, fontSize: 20)),
+                    ]),
+                  ]),
+                ),
+                const SizedBox(height: 14),
+                RxBtn(label: 'Confirm Order', onPressed: () => Navigator.pushNamed(context, AppRoutes.payment)),
+                const SizedBox(height: 6),
+                Center(child: TextButton(onPressed: () {}, child: Text('CANCEL', style: GoogleFonts.outfit(color: r.text3, fontSize: 11, fontWeight: FontWeight.w600, letterSpacing: 1)))),
+              ]),
+            ),
+          ),
+        ]),
+      );
+
+  Widget _safR(ChatMessage m, Rx r) => Padding(
+        padding: const EdgeInsets.only(bottom: 18, right: 20),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          _av(),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: r.card,
+                borderRadius: const BorderRadius.only(topLeft: Radius.circular(4), topRight: Radius.circular(16), bottomLeft: Radius.circular(16), bottomRight: Radius.circular(16)),
+                border: Border.all(color: r.border.withOpacity(0.4)),
+              ),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(m.text, style: GoogleFonts.outfit(color: r.text2, fontSize: 12, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 14),
+                if (m.medicines != null) ...m.medicines!.map((med) => _MC(med: med)),
+                ...m.warnings!.map((w) => Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(color: r.errBg, borderRadius: BorderRadius.circular(10), border: const Border(left: BorderSide(color: C.err, width: 3))),
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Row(children: [
+                          const Icon(Icons.shield_rounded, color: C.err, size: 15),
+                          const SizedBox(width: 8),
+                          Text('PRESCRIPTION REQUIRED', style: GoogleFonts.outfit(color: C.err, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.8)),
+                        ]),
+                        const SizedBox(height: 8),
+                        Text(w.message, style: GoogleFonts.outfit(color: r.text1, fontSize: 13, height: 1.5)),
+                        const SizedBox(height: 12),
+                        RxBtn(label: 'Upload Prescription', icon: Icons.upload_rounded, color: C.err, onPressed: () {}),
+                      ]),
+                    )),
+              ]),
+            ),
+          ),
+        ]),
+      );
+
+  Widget _ordR(ChatMessage m, Rx r) {
+    final o = m.order ?? MockData.orders.first;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 18, right: 20),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        _av(),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: r.card,
+              borderRadius: const BorderRadius.only(topLeft: Radius.circular(4), topRight: Radius.circular(16), bottomLeft: Radius.circular(16), bottomRight: Radius.circular(16)),
+              border: const Border(left: BorderSide(color: C.ok, width: 3)),
+            ),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(color: r.okBg, borderRadius: BorderRadius.circular(10)),
+                child: Row(children: [
+                  const Icon(Icons.check_circle_rounded, color: C.ok, size: 20),
+                  const SizedBox(width: 10),
+                  Text('Order Placed', style: GoogleFonts.dmSerifDisplay(color: C.ok, fontSize: 18)),
+                ]),
+              ),
+              const SizedBox(height: 14),
+              Row(children: [
+                Text('ORDER ID  ', style: GoogleFonts.outfit(color: r.text3, fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 1)),
+                Mono(o.orderUid, size: 12, color: r.text1),
+              ]),
+              const SizedBox(height: 6),
+              Text(o.formattedTotal, style: GoogleFonts.dmSerifDisplay(color: r.text1, fontSize: 22)),
+              const SizedBox(height: 14),
+              RxBtn(label: 'Track Order', icon: Icons.local_shipping_rounded, color: C.compute, onPressed: () => Navigator.pushNamed(context, AppRoutes.orderTracking)),
+            ]),
+          ),
+        ),
+      ]),
+    );
+  }
+
+  String _ft(DateTime d) => '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+}
+
+class _MC extends StatefulWidget {
+  final MedicineModel med;
+  const _MC({required this.med});
+  @override
+  State<_MC> createState() => _MCS();
+}
+
+class _MCS extends State<_MC> {
+  late int _q;
+  @override
+  void initState() {
+    super.initState();
+    _q = widget.med.quantity;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final r = context.rx;
+    final m = widget.med;
+    final sc = m.stock == 0 ? C.err : m.stock < 10 ? C.warn : C.ok;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(color: r.surface, borderRadius: BorderRadius.circular(10)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(m.name, style: GoogleFonts.outfit(color: r.text1, fontSize: 14, fontWeight: FontWeight.w600)),
+        const SizedBox(height: 6),
+        Text('PZN: ${m.pzn}  ·  ${m.formattedPrice}  ·  ${m.package ?? ''}', style: GoogleFonts.outfit(color: r.text3, fontSize: 11)),
+        const SizedBox(height: 8),
+        Row(children: [
+          Container(width: 6, height: 6, decoration: BoxDecoration(color: sc, shape: BoxShape.circle)),
+          const SizedBox(width: 6),
+          Text(m.stock == 0 ? 'OUT OF STOCK' : m.stock < 10 ? 'LOW (${m.stock})' : 'IN STOCK (${m.stock})',
+              style: GoogleFonts.outfit(color: sc, fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 0.8)),
+          if (m.rxRequired) ...[const Spacer(), RxBadge(text: 'Rx', color: C.err, icon: Icons.shield_rounded)],
+        ]),
+        const SizedBox(height: 10),
+        Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+          _qb(Icons.remove, () {
+            if (_q > 1) setState(() => _q--);
+          }),
+          Padding(padding: const EdgeInsets.symmetric(horizontal: 14), child: Text('$_q', style: GoogleFonts.outfit(color: r.text1, fontSize: 15, fontWeight: FontWeight.w600))),
+          _qb(Icons.add, () => setState(() => _q++)),
+        ]),
+      ]),
+    );
+  }
+
+  Widget _qb(IconData ic, VoidCallback fn) {
+    final r = context.rx;
+    return GestureDetector(
+      onTap: fn,
+      child: Container(
+        width: 32,
+        height: 32,
+        decoration: BoxDecoration(color: r.card, borderRadius: BorderRadius.circular(8), border: Border.all(color: r.border)),
+        child: Icon(ic, size: 14, color: r.text1),
+      ),
+    );
+  }
+}
