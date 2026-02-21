@@ -1,0 +1,57 @@
+"""
+Simple migration script — adds missing columns to existing tables.
+Safe to run multiple times (checks before altering).
+"""
+
+from sqlalchemy import text, inspect
+from database import engine, Base
+
+# Import all models so Base.metadata knows about them
+from models.user import User, OTP  # noqa: F401
+
+
+def get_existing_columns(conn, table_name: str) -> set:
+    """Get the set of column names that already exist in a table."""
+    insp = inspect(conn)
+    if not insp.has_table(table_name):
+        return set()
+    return {col["name"] for col in insp.get_columns(table_name)}
+
+
+def migrate():
+    with engine.connect() as conn:
+        # 1. Create any tables that don't exist yet
+        Base.metadata.create_all(bind=engine)
+        print("  ✓ Tables created/verified")
+
+        # 2. Add missing columns to 'users' table
+        existing = get_existing_columns(conn, "users")
+        print(f"  ℹ Existing columns in users: {existing}")
+
+        migrations = [
+            ("google_id", "VARCHAR(255) UNIQUE"),
+            ("profile_picture", "TEXT"),
+        ]
+
+        for col_name, col_type in migrations:
+            if col_name not in existing:
+                sql = f"ALTER TABLE users ADD COLUMN {col_name} {col_type}"
+                conn.execute(text(sql))
+                conn.commit()
+                print(f"  ✓ Added column: users.{col_name}")
+            else:
+                print(f"  · Column already exists: users.{col_name}")
+
+        # 3. Make phone nullable (it was NOT NULL before Google-only users)
+        # This is safe to run even if already nullable
+        conn.execute(text(
+            "ALTER TABLE users ALTER COLUMN phone DROP NOT NULL"
+        ))
+        conn.commit()
+        print("  ✓ users.phone is now nullable")
+
+    print("  ✓ Migration complete")
+
+
+if __name__ == "__main__":
+    migrate()

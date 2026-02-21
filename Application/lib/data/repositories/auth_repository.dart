@@ -10,14 +10,35 @@ class AuthRepository {
     scopes: ['email', 'profile'],
   );
 
-  // ─── Google Sign-In via Firebase ────────────────────────
+  // ─── Phone OTP ────────────────────────────────────────────
+  Future<Map<String, dynamic>> sendOtp(String phone) async {
+    final res = await _api.dio.post(
+      ApiConfig.sendOtp,
+      data: {'phone': phone},
+    );
+    return res.data;
+  }
+
+  Future<Map<String, dynamic>> verifyOtp(String phone, String otp) async {
+    final res = await _api.dio.post(
+      ApiConfig.verifyOtp,
+      data: {'phone': phone, 'otp': otp},
+    );
+    final data = res.data;
+    // Save JWT token from backend
+    await _api.saveToken(data['access_token']);
+    return data;
+  }
+
+  // ─── Google Sign-In via Firebase ──────────────────────────
   Future<Map<String, dynamic>?> signInWithGoogle() async {
     // 1. Trigger Google Sign-In
     final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
     if (googleUser == null) return null; // User cancelled
 
     // 2. Get Google auth credentials
-    final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
+    final GoogleSignInAuthentication googleAuth =
+        await googleUser.authentication;
 
     // 3. Sign in to Firebase with Google credential
     final credential = GoogleAuthProvider.credential(
@@ -47,7 +68,7 @@ class AuthRepository {
     return data;
   }
 
-  // ─── Registration ───────────────────────────────────────
+  // ─── Registration ─────────────────────────────────────────
   Future<Map<String, dynamic>> registerUser({
     required String name,
     required int age,
@@ -67,7 +88,7 @@ class AuthRepository {
     return res.data;
   }
 
-  // ─── Session ────────────────────────────────────────────
+  // ─── Session ──────────────────────────────────────────────
   Future<void> logout() async {
     try {
       await _firebaseAuth.signOut();

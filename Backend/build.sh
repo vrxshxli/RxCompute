@@ -8,6 +8,9 @@ echo "▸ Installing Python dependencies..."
 pip install --upgrade pip
 pip install -r requirements.txt
 
+echo "▸ Running database migrations..."
+python migrate.py
+
 echo "▸ Seeding database (skips if data already exists)..."
 python seed.py
 
