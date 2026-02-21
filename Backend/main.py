@@ -1,5 +1,6 @@
 import os
 import json
+import tempfile
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,17 +18,39 @@ from routers import (
 
 # ─── Initialize Firebase Admin SDK ────────────────────────
 if not firebase_admin._apps:
-    # Option 1: GOOGLE_APPLICATION_CREDENTIALS env var (file path)
-    # Option 2: FIREBASE_SERVICE_ACCOUNT env var (JSON string — best for Render)
     firebase_sa = os.getenv("FIREBASE_SERVICE_ACCOUNT")
     if firebase_sa:
-        cred = credentials.Certificate(json.loads(firebase_sa))
-        firebase_admin.initialize_app(cred)
-    elif os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
-        firebase_admin.initialize_app()
+        try:
+            # Try parsing directly
+            sa_dict = json.loads(firebase_sa)
+        except json.JSONDecodeError:
+            # Render sometimes adds extra quotes — strip them
+            cleaned = firebase_sa.strip().strip("'").strip('"')
+            try:
+                sa_dict = json.loads(cleaned)
+            except json.JSONDecodeError:
+                # Last resort: write to temp file and use file path
+                print("⚠ Could not parse FIREBASE_SERVICE_ACCOUNT as JSON, writing to temp file...")
+                tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
+                tmp.write(firebase_sa)
+                tmp.close()
+                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = tmp.name
+                firebase_admin.initialize_app()
+                sa_dict = None
+
+        if sa_dict is not None:
+            # Fix escaped newlines in private_key (common Render issue)
+            if "private_key" in sa_dict and "\\n" in sa_dict["private_key"]:
+                sa_dict["private_key"] = sa_dict["private_key"].replace("\\n", "\n")
+            cred = credentials.Certificate(sa_dict)
+            firebase_admin.initialize_app(cred)
+        print("✓ Firebase Admin SDK initialized")
     else:
-        # Default init (works in GCP environments)
-        firebase_admin.initialize_app()
+        print("⚠ FIREBASE_SERVICE_ACCOUNT not set — Google Sign-In will not work")
+        try:
+            firebase_admin.initialize_app()
+        except Exception:
+            pass
 
 # Create all tables
 Base.metadata.create_all(bind=engine)
