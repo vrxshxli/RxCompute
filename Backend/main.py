@@ -4,6 +4,7 @@ import tempfile
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 import firebase_admin
 from firebase_admin import credentials
 
@@ -14,6 +15,9 @@ from routers import (
     medicines_router,
     orders_router,
     notifications_router,
+    user_medications_router,
+    home_router,
+    chat_router,
 )
 
 # ─── Initialize Firebase Admin SDK ────────────────────────
@@ -76,6 +80,13 @@ app.include_router(users_router)
 app.include_router(medicines_router)
 app.include_router(orders_router)
 app.include_router(notifications_router)
+app.include_router(user_medications_router)
+app.include_router(home_router)
+app.include_router(chat_router)
+
+uploads_path = os.path.join(os.path.dirname(__file__), "uploads")
+os.makedirs(uploads_path, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=uploads_path), name="uploads")
 
 
 @app.get("/", tags=["Health"])

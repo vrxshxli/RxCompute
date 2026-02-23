@@ -46,7 +46,14 @@ class HomeTab extends StatelessWidget {
                 ]),
                 const SizedBox(height: 32),
 
-                _Tile(ic: Icons.medication_rounded, cl: C.compute, t: "TODAY'S MEDICATIONS", s: '${state.activeMeds.length} medications scheduled', trail: Icon(Icons.chevron_right_rounded, color: r.text3, size: 20)),
+                _Tile(
+                  ic: Icons.medication_rounded,
+                  cl: C.compute,
+                  t: "TODAY'S MEDICATIONS",
+                  s: state.activeMeds.isEmpty ? 'No medications yet. Tap to add.' : '${state.activeMeds.length} medications scheduled',
+                  trail: Icon(Icons.chevron_right_rounded, color: r.text3, size: 20),
+                  onTap: () => _showAddMedicationSheet(context),
+                ),
                 const SizedBox(height: 10),
                 _Tile(
                   ic: Icons.schedule_rounded,
@@ -59,9 +66,10 @@ class HomeTab extends StatelessWidget {
                     decoration: BoxDecoration(color: C.rx.withOpacity(r.dark ? 0.08 : 0.05), borderRadius: BorderRadius.circular(8)),
                     child: Text('REORDER', style: GoogleFonts.outfit(color: C.rx, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1)),
                   ),
+                  onTap: () => _showAddMedicationSheet(context),
                 ),
                 const SizedBox(height: 10),
-                _Tile(ic: Icons.auto_graph_rounded, cl: C.ok, t: 'MONTHLY INSIGHT', s: 'Saved €12.40 with alternatives'),
+                _Tile(ic: Icons.auto_graph_rounded, cl: C.ok, t: 'MONTHLY INSIGHT', s: state.monthlyInsight),
                 const SizedBox(height: 36),
 
                 const SecLabel('QUICK ACTIONS'),
@@ -106,6 +114,54 @@ class HomeTab extends StatelessWidget {
     final h = DateTime.now().hour;
     return h < 12 ? 'morning' : h < 17 ? 'afternoon' : 'evening';
   }
+
+  Future<void> _showAddMedicationSheet(BuildContext context) async {
+    final nameCtrl = TextEditingController();
+    final dosageCtrl = TextEditingController();
+    final freqCtrl = TextEditingController(text: '1');
+    final qtyCtrl = TextEditingController(text: '30');
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) {
+        final r = context.rx;
+        return Padding(
+          padding: EdgeInsets.fromLTRB(16, 16, 16, MediaQuery.of(ctx).viewInsets.bottom + 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Add Medication', style: GoogleFonts.dmSerifDisplay(color: r.text1, fontSize: 24)),
+              const SizedBox(height: 12),
+              TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Medicine Name')),
+              TextField(controller: dosageCtrl, decoration: const InputDecoration(labelText: 'Dosage (example: 1 tablet)')),
+              TextField(controller: freqCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Times per day')),
+              TextField(controller: qtyCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Available units')),
+              const SizedBox(height: 16),
+              RxBtn(
+                label: 'Save Medication',
+                onPressed: () {
+                  final freq = int.tryParse(freqCtrl.text.trim()) ?? 1;
+                  final qty = int.tryParse(qtyCtrl.text.trim()) ?? 30;
+                  if (nameCtrl.text.trim().isEmpty || dosageCtrl.text.trim().isEmpty) return;
+                  context.read<HomeBloc>().add(
+                        AddMedicationEvent(
+                          medicineName: nameCtrl.text.trim(),
+                          dosageInstruction: dosageCtrl.text.trim(),
+                          frequencyPerDay: freq < 1 ? 1 : freq,
+                          quantityUnits: qty < 1 ? 1 : qty,
+                        ),
+                      );
+                  Navigator.pop(ctx);
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
 }
 
 class _Tile extends StatelessWidget {
@@ -114,23 +170,27 @@ class _Tile extends StatelessWidget {
   final String t, s;
   final Color? sColor;
   final Widget? trail;
-  const _Tile({required this.ic, required this.cl, required this.t, required this.s, this.sColor, this.trail});
+  final VoidCallback? onTap;
+  const _Tile({required this.ic, required this.cl, required this.t, required this.s, this.sColor, this.trail, this.onTap});
   @override
   Widget build(BuildContext context) {
     final r = context.rx;
-    return RxCard(
-      child: Row(children: [
-        IcoBlock(icon: ic, color: cl),
-        const SizedBox(width: 14),
-        Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(t, style: GoogleFonts.outfit(color: r.text3, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1.2)),
-            const SizedBox(height: 4),
-            Text(s, style: GoogleFonts.outfit(color: sColor ?? r.text2, fontSize: 13)),
-          ]),
-        ),
-        if (trail != null) trail!,
-      ]),
+    return GestureDetector(
+      onTap: onTap,
+      child: RxCard(
+        child: Row(children: [
+          IcoBlock(icon: ic, color: cl),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(t, style: GoogleFonts.outfit(color: r.text3, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1.2)),
+              const SizedBox(height: 4),
+              Text(s, style: GoogleFonts.outfit(color: sColor ?? r.text2, fontSize: 13)),
+            ]),
+          ),
+          if (trail != null) trail!,
+        ]),
+      ),
     );
   }
 }

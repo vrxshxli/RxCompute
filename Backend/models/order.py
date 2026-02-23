@@ -1,5 +1,5 @@
 from sqlalchemy import (
-    Column, Integer, String, Float, DateTime, ForeignKey, Enum as SAEnum,
+    Column, Integer, String, Float, DateTime, ForeignKey, Enum as SAEnum, Boolean
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -44,5 +44,9 @@ class OrderItem(Base):
     name = Column(String(200), nullable=False)
     quantity = Column(Integer, default=1)
     price = Column(Float, nullable=False)
+    dosage_instruction = Column(String(120), nullable=True)
+    strips_count = Column(Integer, default=1)
+    rx_required = Column(Boolean, default=False)
+    prescription_file = Column(String(300), nullable=True)
 
     order = relationship("Order", back_populates="items")

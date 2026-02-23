@@ -4,7 +4,11 @@ import '../../../data/models/chat_models.dart';
 import '../../../data/models/order_model.dart';
 import '../../../data/models/notification_model.dart';
 import '../../../data/models/user_model.dart';
-import '../../../data/mock_data.dart';
+import '../../../data/repositories/home_repository.dart';
+import '../../../data/repositories/notification_repository.dart';
+import '../../../data/repositories/order_repository.dart';
+import '../../../data/repositories/user_medication_repository.dart';
+import '../../../data/repositories/user_repository.dart';
 
 // ─── Events ──────────────────────────────────────────────
 abstract class HomeEvent extends Equatable {
@@ -14,6 +18,23 @@ abstract class HomeEvent extends Equatable {
 
 class LoadHomeDataEvent extends HomeEvent {}
 
+class AddMedicationEvent extends HomeEvent {
+  final String medicineName;
+  final String dosageInstruction;
+  final int frequencyPerDay;
+  final int quantityUnits;
+
+  AddMedicationEvent({
+    required this.medicineName,
+    required this.dosageInstruction,
+    required this.frequencyPerDay,
+    required this.quantityUnits,
+  });
+
+  @override
+  List<Object?> get props => [medicineName, dosageInstruction, frequencyPerDay, quantityUnits];
+}
+
 // ─── State ───────────────────────────────────────────────
 class HomeState extends Equatable {
   final UserModel? user;
@@ -21,6 +42,7 @@ class HomeState extends Equatable {
   final List<Refill> alerts;
   final List<OrderModel> orders;
   final List<NotificationModel> notifications;
+  final String monthlyInsight;
   final bool isLoading;
   final String? error;
 
@@ -30,6 +52,7 @@ class HomeState extends Equatable {
     this.alerts = const [],
     this.orders = const [],
     this.notifications = const [],
+    this.monthlyInsight = 'No monthly insights yet',
     this.isLoading = false,
     this.error,
   });
@@ -40,6 +63,7 @@ class HomeState extends Equatable {
     List<Refill>? alerts,
     List<OrderModel>? orders,
     List<NotificationModel>? notifications,
+    String? monthlyInsight,
     bool? isLoading,
     String? error,
   }) =>
@@ -49,32 +73,94 @@ class HomeState extends Equatable {
         alerts: alerts ?? this.alerts,
         orders: orders ?? this.orders,
         notifications: notifications ?? this.notifications,
+        monthlyInsight: monthlyInsight ?? this.monthlyInsight,
         isLoading: isLoading ?? this.isLoading,
-        error: error,
+        error: error ?? this.error,
       );
 
   @override
-  List<Object?> get props => [user, activeMeds, alerts, orders, notifications, isLoading, error];
+  List<Object?> get props => [user, activeMeds, alerts, orders, notifications, monthlyInsight, isLoading, error];
 }
 
 // ─── Bloc ────────────────────────────────────────────────
 class HomeBloc extends Bloc<HomeEvent, HomeState> {
+  final UserRepository _userRepo = UserRepository();
+  final UserMedicationRepository _medRepo = UserMedicationRepository();
+  final OrderRepository _orderRepo = OrderRepository();
+  final NotificationRepository _notificationRepo = NotificationRepository();
+  final HomeRepository _homeRepo = HomeRepository();
+
   HomeBloc() : super(const HomeState()) {
     on<LoadHomeDataEvent>(_onLoad);
+    on<AddMedicationEvent>(_onAddMedication);
   }
 
   Future<void> _onLoad(LoadHomeDataEvent event, Emitter<HomeState> emit) async {
     emit(state.copyWith(isLoading: true));
     try {
-      // TODO: Replace mock data with repository calls
+      final user = await _userRepo.getProfile();
+      final meds = await _medRepo.getUserMedications();
+      final orders = await _orderRepo.getOrders();
+      final notifications = await _notificationRepo.getNotifications();
+      final summary = await _homeRepo.getSummary();
+
+      final activeMeds = meds
+          .map(
+            (m) => ActiveMed(
+              name: m.name,
+              dosage: '${m.dosageInstruction} · ${m.frequencyPerDay}x/day',
+              remaining: m.quantityUnits,
+              total: (m.daysLeft * m.frequencyPerDay).clamp(1, 2000),
+            ),
+          )
+          .toList();
+
+      final alerts = summary.refillAlert == null
+          ? const <Refill>[]
+          : [
+              Refill(
+                patientId: 'self',
+                medicine: summary.refillAlert!.name,
+                daysLeft: summary.refillAlert!.daysLeft,
+                risk: summary.refillAlert!.daysLeft <= 2
+                    ? RefillRisk.overdue
+                    : summary.refillAlert!.daysLeft <= 5
+                        ? RefillRisk.high
+                        : summary.refillAlert!.daysLeft <= 10
+                            ? RefillRisk.medium
+                            : RefillRisk.low,
+              ),
+            ];
+
+      final monthlyInsight = summary.monthlyOrderCount == 0
+          ? 'No order activity this month yet'
+          : '${summary.monthlyOrderCount} orders · €${summary.monthlyTotalSpend.toStringAsFixed(2)} spent this month';
+
       emit(state.copyWith(
-        user: MockData.user,
-        activeMeds: MockData.activeMeds,
-        alerts: MockData.alerts,
-        orders: MockData.orders,
-        notifications: MockData.notifications,
+        user: user,
+        activeMeds: activeMeds,
+        alerts: alerts,
+        orders: orders,
+        notifications: notifications,
+        monthlyInsight: monthlyInsight,
         isLoading: false,
+        error: null,
       ));
+    } catch (e) {
+      emit(state.copyWith(isLoading: false, error: e.toString()));
+    }
+  }
+
+  Future<void> _onAddMedication(AddMedicationEvent event, Emitter<HomeState> emit) async {
+    emit(state.copyWith(isLoading: true, error: null));
+    try {
+      await _medRepo.addMedication(
+        customName: event.medicineName,
+        dosageInstruction: event.dosageInstruction,
+        frequencyPerDay: event.frequencyPerDay,
+        quantityUnits: event.quantityUnits,
+      );
+      add(LoadHomeDataEvent());
     } catch (e) {
       emit(state.copyWith(isLoading: false, error: e.toString()));
     }

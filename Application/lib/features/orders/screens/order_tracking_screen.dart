@@ -4,7 +4,6 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/rx_theme_ext.dart';
 import '../../../core/widgets/shared_widgets.dart';
-import '../../../data/mock_data.dart';
 import '../bloc/order_bloc.dart';
 
 class OrderTrackingScreen extends StatelessWidget {
@@ -15,8 +14,19 @@ class OrderTrackingScreen extends StatelessWidget {
     final r = context.rx;
     return BlocBuilder<OrderBloc, OrderState>(
       builder: (context, state) {
-        final o = state.activeOrder ?? MockData.orders.first;
-        final steps = MockData.orderSteps;
+        final o = state.activeOrder;
+        if (o == null) {
+          return Scaffold(
+            backgroundColor: r.bg,
+            appBar: AppBar(
+              backgroundColor: r.bg,
+              leading: IconButton(icon: Icon(Icons.arrow_back_rounded, color: r.text1), onPressed: () => Navigator.pop(context)),
+              title: Text('TRACK ORDER', style: GoogleFonts.outfit(color: r.text1, fontSize: 13, fontWeight: FontWeight.w700, letterSpacing: 2)),
+            ),
+            body: const EmptyState(icon: Icons.local_shipping_outlined, title: 'No active order'),
+          );
+        }
+        final steps = _stepsForStatus(o.status.name);
         return Scaffold(
           backgroundColor: r.bg,
           appBar: AppBar(
@@ -102,5 +112,26 @@ class OrderTrackingScreen extends StatelessWidget {
         );
       },
     );
+  }
+
+  List<Map<String, dynamic>> _stepsForStatus(String status) {
+    const labels = ['Order Confirmed', 'Pharmacy Verified', 'Picking', 'Packed', 'Dispatched', 'Delivered'];
+    final statusMap = {
+      'pending': 0,
+      'confirmed': 0,
+      'verified': 1,
+      'picking': 2,
+      'packed': 3,
+      'dispatched': 4,
+      'delivered': 5,
+    };
+    final current = statusMap[status] ?? 0;
+    return List.generate(labels.length, (i) {
+      return {
+        'label': labels[i],
+        'done': i <= current,
+        'current': i == current,
+      };
+    });
   }
 }

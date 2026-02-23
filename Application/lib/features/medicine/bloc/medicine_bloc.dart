@@ -2,7 +2,8 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
 import '../../../data/models/medicine_model.dart';
 import '../../../data/models/chat_models.dart';
-import '../../../data/mock_data.dart';
+import '../../../data/repositories/medicine_repository.dart';
+import '../../../data/repositories/user_medication_repository.dart';
 
 // ─── Events ──────────────────────────────────────────────
 abstract class MedicineEvent extends Equatable {
@@ -61,6 +62,9 @@ class MedicineState extends Equatable {
 
 // ─── Bloc ────────────────────────────────────────────────
 class MedicineBloc extends Bloc<MedicineEvent, MedicineState> {
+  final MedicineRepository _medicineRepo = MedicineRepository();
+  final UserMedicationRepository _userMedicationRepo = UserMedicationRepository();
+
   MedicineBloc() : super(const MedicineState()) {
     on<LoadMedicinesEvent>(_onLoad);
     on<SearchMedicinesEvent>(_onSearch);
@@ -69,13 +73,24 @@ class MedicineBloc extends Bloc<MedicineEvent, MedicineState> {
   Future<void> _onLoad(LoadMedicinesEvent event, Emitter<MedicineState> emit) async {
     emit(state.copyWith(isLoading: true));
     try {
-      // TODO: Replace with repository calls
+      final meds = await _medicineRepo.getMedicines();
+      final userMeds = await _userMedicationRepo.getUserMedications();
+      final active = userMeds
+          .map((m) => ActiveMed(
+                name: m.name,
+                dosage: '${m.dosageInstruction} · ${m.frequencyPerDay}x/day',
+                remaining: m.quantityUnits,
+                total: (m.daysLeft * m.frequencyPerDay).clamp(1, 2000),
+              ))
+          .toList();
+      final low = active.where((m) => m.remaining <= 5).toList();
       emit(state.copyWith(
-        medicines: MockData.medicines,
-        activeMeds: MockData.activeMeds,
-        lowMeds: MockData.lowMeds,
-        history: MockData.hist.map((e) => e.map((k, v) => MapEntry(k, v.toString()))).toList(),
+        medicines: meds,
+        activeMeds: active,
+        lowMeds: low,
+        history: const [],
         isLoading: false,
+        error: null,
       ));
     } catch (e) {
       emit(state.copyWith(isLoading: false, error: e.toString()));
@@ -83,9 +98,11 @@ class MedicineBloc extends Bloc<MedicineEvent, MedicineState> {
   }
 
   Future<void> _onSearch(SearchMedicinesEvent event, Emitter<MedicineState> emit) async {
-    // TODO: Call repository search
-    final q = event.query.toLowerCase();
-    final filtered = MockData.medicines.where((m) => m.name.toLowerCase().contains(q)).toList();
-    emit(state.copyWith(medicines: filtered));
+    try {
+      final meds = await _medicineRepo.getMedicines(search: event.query);
+      emit(state.copyWith(medicines: meds, error: null));
+    } catch (e) {
+      emit(state.copyWith(error: e.toString()));
+    }
   }
 }

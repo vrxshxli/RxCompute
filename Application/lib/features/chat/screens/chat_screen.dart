@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:image_picker/image_picker.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/rx_theme_ext.dart';
 import '../../../core/widgets/shared_widgets.dart';
 import '../../../config/routes.dart';
 import '../../../data/models/chat_models.dart';
 import '../../../data/models/medicine_model.dart';
-import '../../../data/mock_data.dart';
 import '../bloc/chat_bloc.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -19,6 +19,7 @@ class ChatScreen extends StatefulWidget {
 class _CS extends State<ChatScreen> {
   final _tc = TextEditingController();
   final _sc = ScrollController();
+  final _picker = ImagePicker();
 
   @override
   void dispose() {
@@ -33,6 +34,13 @@ class _CS extends State<ChatScreen> {
     context.read<ChatBloc>().add(SendMessageEvent(t));
     _tc.clear();
     _scrollEnd();
+  }
+
+  Future<void> _pickAndUploadPrescription() async {
+    final xfile = await _picker.pickImage(source: ImageSource.gallery, imageQuality: 85);
+    if (xfile == null) return;
+    if (!mounted) return;
+    context.read<ChatBloc>().add(UploadPrescriptionEvent(xfile.path));
   }
 
   void _scrollEnd() => WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -253,7 +261,7 @@ class _CS extends State<ChatScreen> {
                   ]),
                 ),
                 const SizedBox(height: 14),
-                RxBtn(label: 'Confirm Order', onPressed: () => Navigator.pushNamed(context, AppRoutes.payment)),
+                RxBtn(label: 'Continue in Chat', onPressed: () => context.read<ChatBloc>().add(SendMessageEvent('yes'))),
                 const SizedBox(height: 6),
                 Center(child: TextButton(onPressed: () {}, child: Text('CANCEL', style: GoogleFonts.outfit(color: r.text3, fontSize: 11, fontWeight: FontWeight.w600, letterSpacing: 1)))),
               ]),
@@ -291,7 +299,7 @@ class _CS extends State<ChatScreen> {
                         const SizedBox(height: 8),
                         Text(w.message, style: GoogleFonts.outfit(color: r.text1, fontSize: 13, height: 1.5)),
                         const SizedBox(height: 12),
-                        RxBtn(label: 'Upload Prescription', icon: Icons.upload_rounded, color: C.err, onPressed: () {}),
+                        RxBtn(label: 'Upload Prescription', icon: Icons.upload_rounded, color: C.err, onPressed: _pickAndUploadPrescription),
                       ]),
                     )),
               ]),
@@ -301,7 +309,8 @@ class _CS extends State<ChatScreen> {
       );
 
   Widget _ordR(ChatMessage m, Rx r) {
-    final o = m.order ?? MockData.orders.first;
+    final o = m.order;
+    if (o == null) return _aiB(m, r);
     return Padding(
       padding: const EdgeInsets.only(bottom: 18, right: 20),
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -369,6 +378,19 @@ class _MCS extends State<_MC> {
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(color: r.surface, borderRadius: BorderRadius.circular(10)),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        if ((m.imageUrl ?? '').isNotEmpty) ...[
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Image.network(
+              m.imageUrl!,
+              height: 120,
+              width: double.infinity,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+            ),
+          ),
+          const SizedBox(height: 10),
+        ],
         Text(m.name, style: GoogleFonts.outfit(color: r.text1, fontSize: 14, fontWeight: FontWeight.w600)),
         const SizedBox(height: 6),
         Text('PZN: ${m.pzn}  ·  ${m.formattedPrice}  ·  ${m.package ?? ''}', style: GoogleFonts.outfit(color: r.text3, fontSize: 11)),

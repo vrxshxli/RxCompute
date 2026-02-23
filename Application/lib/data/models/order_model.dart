@@ -44,6 +44,10 @@ class OrderItemModel {
   final String name;
   final int quantity;
   final double price;
+  final String? dosageInstruction;
+  final int stripsCount;
+  final bool rxRequired;
+  final String? prescriptionFile;
 
   const OrderItemModel({
     required this.id,
@@ -51,6 +55,10 @@ class OrderItemModel {
     required this.name,
     required this.quantity,
     required this.price,
+    this.dosageInstruction,
+    this.stripsCount = 1,
+    this.rxRequired = false,
+    this.prescriptionFile,
   });
 
   factory OrderItemModel.fromJson(Map<String, dynamic> json) => OrderItemModel(
@@ -59,6 +67,10 @@ class OrderItemModel {
         name: json['name'],
         quantity: json['quantity'] ?? 1,
         price: (json['price'] as num).toDouble(),
+        dosageInstruction: json['dosage_instruction'],
+        stripsCount: json['strips_count'] ?? 1,
+        rxRequired: json['rx_required'] ?? false,
+        prescriptionFile: json['prescription_file'],
       );
 
   Map<String, dynamic> toJson() => {
@@ -66,6 +78,9 @@ class OrderItemModel {
         'name': name,
         'quantity': quantity,
         'price': price,
+        if (dosageInstruction != null) 'dosage_instruction': dosageInstruction,
+        'strips_count': stripsCount,
+        if (prescriptionFile != null) 'prescription_file': prescriptionFile,
       };
 
   String get formattedPrice => '€${(price * quantity).toStringAsFixed(2)}';

@@ -1,7 +1,7 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
 import '../../../data/models/order_model.dart';
-import '../../../data/mock_data.dart';
+import '../../../data/repositories/order_repository.dart';
 
 // ─── Events ──────────────────────────────────────────────
 abstract class OrderEvent extends Equatable {
@@ -54,6 +54,8 @@ class OrderState extends Equatable {
 
 // ─── Bloc ────────────────────────────────────────────────
 class OrderBloc extends Bloc<OrderEvent, OrderState> {
+  final OrderRepository _orderRepo = OrderRepository();
+
   OrderBloc() : super(const OrderState()) {
     on<LoadOrdersEvent>(_onLoad);
     on<CreateOrderEvent>(_onCreate);
@@ -62,13 +64,13 @@ class OrderBloc extends Bloc<OrderEvent, OrderState> {
   Future<void> _onLoad(LoadOrdersEvent event, Emitter<OrderState> emit) async {
     emit(state.copyWith(isLoading: true));
     try {
-      // TODO: Replace with repository calls
-      final orders = MockData.orders;
+      final orders = await _orderRepo.getOrders();
       final active = orders.where((o) => o.status.isActive).toList();
       emit(state.copyWith(
         orders: orders,
         activeOrder: active.isNotEmpty ? active.first : null,
         isLoading: false,
+        error: null,
       ));
     } catch (e) {
       emit(state.copyWith(isLoading: false, error: e.toString()));
@@ -78,8 +80,11 @@ class OrderBloc extends Bloc<OrderEvent, OrderState> {
   Future<void> _onCreate(CreateOrderEvent event, Emitter<OrderState> emit) async {
     emit(state.copyWith(isLoading: true));
     try {
-      // TODO: Call order repository
-      emit(state.copyWith(isLoading: false));
+      await _orderRepo.createOrder(
+        items: event.items,
+        paymentMethod: event.paymentMethod,
+      );
+      add(LoadOrdersEvent());
     } catch (e) {
       emit(state.copyWith(isLoading: false, error: e.toString()));
     }

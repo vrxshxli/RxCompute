@@ -1,4 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+import csv
+import io
+
+from fastapi import APIRouter, Depends, HTTPException, Query, File, UploadFile
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -74,3 +77,88 @@ def update_medicine(
     db.commit()
     db.refresh(med)
     return med
+
+
+def _read_row_value(row: dict[str, str], keys: list[str]) -> str | None:
+    lower_map = {k.strip().lower(): (v.strip() if isinstance(v, str) else v) for k, v in row.items()}
+    for key in keys:
+        val = lower_map.get(key.lower())
+        if val:
+            return str(val)
+    return None
+
+
+def _to_bool(raw: str | None) -> bool:
+    if not raw:
+        return False
+    return raw.strip().lower() in {"yes", "true", "1", "required", "rx", "prescription"}
+
+
+@router.post("/import-csv")
+async def import_medicines_csv(
+    file: UploadFile = File(...),
+    _: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if not file.filename or not file.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Please upload a valid CSV file")
+
+    content = await file.read()
+    decoded = content.decode("utf-8-sig")
+    reader = csv.DictReader(io.StringIO(decoded))
+
+    created = 0
+    updated = 0
+    skipped = 0
+
+    for row in reader:
+        name = _read_row_value(row, ["product name", "name"])
+        pzn = _read_row_value(row, ["pzn"])
+        price_raw = _read_row_value(row, ["price rec", "price"])
+        if not name or not pzn or not price_raw:
+            skipped += 1
+            continue
+
+        normalized_price = price_raw.replace(",", ".").strip()
+        try:
+            price = float(normalized_price)
+        except ValueError:
+            skipped += 1
+            continue
+
+        package = _read_row_value(row, ["package size", "package"])
+        description = _read_row_value(row, ["descriptions", "description"])
+        image_url = _read_row_value(row, ["image", "image_url"])
+        rx_required = _to_bool(_read_row_value(row, ["prescription required", "rx_required"]))
+
+        med = db.query(Medicine).filter(Medicine.pzn == pzn).first()
+        if med:
+            med.name = name
+            med.price = price
+            med.package = package
+            med.description = description
+            med.image_url = image_url
+            med.rx_required = rx_required
+            updated += 1
+        else:
+            db.add(
+                Medicine(
+                    name=name,
+                    pzn=pzn,
+                    price=price,
+                    package=package,
+                    description=description,
+                    image_url=image_url,
+                    rx_required=rx_required,
+                    stock=50,
+                )
+            )
+            created += 1
+
+    db.commit()
+    return {
+        "message": "CSV import completed",
+        "created": created,
+        "updated": updated,
+        "skipped": skipped,
+    }

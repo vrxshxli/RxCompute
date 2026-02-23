@@ -15,5 +15,6 @@ class Medicine(Base):
     stock = Column(Integer, default=0)
     rx_required = Column(Boolean, default=False)
     description = Column(String(500), nullable=True)
+    image_url = Column(String(500), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

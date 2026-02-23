@@ -8,6 +8,7 @@ from database import get_db
 from dependencies import get_current_user
 from models.user import User
 from models.order import Order, OrderItem, OrderStatus
+from models.medicine import Medicine
 from schemas.order import OrderCreate, OrderOut, OrderStatusUpdate
 
 router = APIRouter(prefix="/orders", tags=["Orders"])
@@ -57,6 +58,30 @@ def create_order(
     db: Session = Depends(get_db),
 ):
     """Create a new order with items."""
+    med_ids = [item.medicine_id for item in data.items]
+    meds = (
+        db.query(Medicine)
+        .filter(Medicine.id.in_(med_ids))
+        .all()
+    )
+    med_map = {m.id: m for m in meds}
+    if len(med_map) != len(set(med_ids)):
+        raise HTTPException(status_code=400, detail="One or more medicines were not found")
+
+    rx_missing = []
+    for item in data.items:
+        med = med_map[item.medicine_id]
+        if med.rx_required and not item.prescription_file:
+            rx_missing.append(med.name)
+    if rx_missing:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "Prescription required for one or more medicines",
+                "medicines": rx_missing,
+            },
+        )
+
     total = sum(item.price * item.quantity for item in data.items)
     order = Order(
         order_uid=_generate_order_uid(),
@@ -70,6 +95,7 @@ def create_order(
     db.flush()
 
     for item in data.items:
+        med = med_map[item.medicine_id]
         db.add(
             OrderItem(
                 order_id=order.id,
@@ -77,6 +103,10 @@ def create_order(
                 name=item.name,
                 quantity=item.quantity,
                 price=item.price,
+                dosage_instruction=item.dosage_instruction,
+                strips_count=item.strips_count,
+                rx_required=med.rx_required,
+                prescription_file=item.prescription_file,
             )
         )
 

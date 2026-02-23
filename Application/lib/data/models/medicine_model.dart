@@ -7,6 +7,7 @@ class MedicineModel {
   final int stock;
   final bool rxRequired;
   final String? description;
+  final String? imageUrl;
   int quantity;
 
   MedicineModel({
@@ -18,6 +19,7 @@ class MedicineModel {
     required this.stock,
     this.rxRequired = false,
     this.description,
+    this.imageUrl,
     this.quantity = 1,
   });
 
@@ -30,6 +32,7 @@ class MedicineModel {
         stock: json['stock'] ?? 0,
         rxRequired: json['rx_required'] ?? false,
         description: json['description'],
+        imageUrl: json['image_url'],
       );
 
   Map<String, dynamic> toJson() => {
@@ -41,6 +44,7 @@ class MedicineModel {
         'stock': stock,
         'rx_required': rxRequired,
         'description': description,
+        'image_url': imageUrl,
       };
 
   String get formattedPrice => '€${price.toStringAsFixed(2)}';

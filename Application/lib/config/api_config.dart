@@ -27,4 +27,11 @@ class ApiConfig {
 
   // Notifications
   static const String notifications = '/notifications';
+
+  // Dynamic home + meds tracker
+  static const String homeSummary = '/home/summary';
+  static const String userMedications = '/user-medications';
+
+  // Chat
+  static const String chatUploadPrescription = '/chat/upload-prescription';
 }

@@ -10,6 +10,7 @@ class MedicineCreate(BaseModel):
     stock: int = 0
     rx_required: bool = False
     description: str | None = None
+    image_url: str | None = None
 
 
 class MedicineUpdate(BaseModel):
@@ -19,6 +20,7 @@ class MedicineUpdate(BaseModel):
     stock: int | None = None
     rx_required: bool | None = None
     description: str | None = None
+    image_url: str | None = None
 
 
 class MedicineOut(BaseModel):
@@ -30,6 +32,7 @@ class MedicineOut(BaseModel):
     stock: int
     rx_required: bool
     description: str | None
+    image_url: str | None
     created_at: datetime | None
 
     class Config:

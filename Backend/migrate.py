@@ -8,6 +8,10 @@ from database import engine, Base
 
 # Import all models so Base.metadata knows about them
 from models.user import User, OTP  # noqa: F401
+from models.medicine import Medicine  # noqa: F401
+from models.order import Order, OrderItem  # noqa: F401
+from models.notification import Notification  # noqa: F401
+from models.user_medication import UserMedication  # noqa: F401
 
 
 def get_existing_columns(conn, table_name: str) -> set:
@@ -49,6 +53,31 @@ def migrate():
         ))
         conn.commit()
         print("  ✓ users.phone is now nullable")
+
+        # 4. Add missing columns to 'order_items' table
+        order_item_cols = get_existing_columns(conn, "order_items")
+        order_item_migrations = [
+            ("dosage_instruction", "VARCHAR(120)"),
+            ("strips_count", "INTEGER DEFAULT 1"),
+            ("rx_required", "BOOLEAN DEFAULT FALSE"),
+            ("prescription_file", "VARCHAR(300)"),
+        ]
+        for col_name, col_type in order_item_migrations:
+            if col_name not in order_item_cols:
+                conn.execute(text(f"ALTER TABLE order_items ADD COLUMN {col_name} {col_type}"))
+                conn.commit()
+                print(f"  ✓ Added column: order_items.{col_name}")
+            else:
+                print(f"  · Column already exists: order_items.{col_name}")
+
+        # 5. Add missing columns to 'medicines' table
+        medicine_cols = get_existing_columns(conn, "medicines")
+        if "image_url" not in medicine_cols:
+            conn.execute(text("ALTER TABLE medicines ADD COLUMN image_url VARCHAR(500)"))
+            conn.commit()
+            print("  ✓ Added column: medicines.image_url")
+        else:
+            print("  · Column already exists: medicines.image_url")
 
     print("  ✓ Migration complete")
 

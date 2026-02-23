@@ -7,6 +7,9 @@ class OrderItemCreate(BaseModel):
     name: str
     quantity: int = 1
     price: float
+    dosage_instruction: str | None = None
+    strips_count: int = 1
+    prescription_file: str | None = None
 
 
 class OrderCreate(BaseModel):
@@ -21,6 +24,10 @@ class OrderItemOut(BaseModel):
     name: str
     quantity: int
     price: float
+    dosage_instruction: str | None = None
+    strips_count: int
+    rx_required: bool
+    prescription_file: str | None = None
 
     class Config:
         from_attributes = True
