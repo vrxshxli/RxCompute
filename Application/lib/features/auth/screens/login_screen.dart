@@ -5,6 +5,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/rx_theme_ext.dart';
 import '../../../core/widgets/shared_widgets.dart';
 import '../../../config/routes.dart';
+import '../../../data/repositories/auth_repository.dart';
 import '../bloc/auth_bloc.dart';
 import '../bloc/auth_event.dart';
 import '../bloc/auth_state.dart';
@@ -19,6 +20,7 @@ class _LoginScreenState extends State<LoginScreen>
     with SingleTickerProviderStateMixin {
   late AnimationController _fadeCtrl;
   final _phoneCtrl = TextEditingController();
+  final AuthRepository _authRepo = AuthRepository();
 
   bool get _phoneValid => _phoneCtrl.text.replaceAll(RegExp(r'\D'), '').length >= 10;
 
@@ -29,6 +31,7 @@ class _LoginScreenState extends State<LoginScreen>
       vsync: this,
       duration: const Duration(milliseconds: 700),
     )..forward();
+    _authRepo.warmupIfNeeded();
   }
 
   @override

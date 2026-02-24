@@ -1,5 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:dio/dio.dart';
 import '../providers/api_provider.dart';
 import '../../config/api_config.dart';
 
@@ -9,20 +10,25 @@ class AuthRepository {
   final GoogleSignIn _googleSignIn = GoogleSignIn(
     scopes: ['email', 'profile'],
   );
+  static bool _didWarmup = false;
 
   // ─── Phone OTP ────────────────────────────────────────────
   Future<Map<String, dynamic>> sendOtp(String phone) async {
-    final res = await _api.dio.post(
-      ApiConfig.sendOtp,
-      data: {'phone': phone},
+    final res = await _requestWithQuickRetry(
+      () => _api.dio.post(
+        ApiConfig.sendOtp,
+        data: {'phone': phone},
+      ),
     );
     return res.data;
   }
 
   Future<Map<String, dynamic>> verifyOtp(String phone, String otp) async {
-    final res = await _api.dio.post(
-      ApiConfig.verifyOtp,
-      data: {'phone': phone, 'otp': otp},
+    final res = await _requestWithQuickRetry(
+      () => _api.dio.post(
+        ApiConfig.verifyOtp,
+        data: {'phone': phone, 'otp': otp},
+      ),
     );
     final data = res.data;
     // Save JWT token from backend
@@ -57,9 +63,11 @@ class AuthRepository {
     }
 
     // 5. Send Firebase ID token to our backend for JWT
-    final res = await _api.dio.post(
-      ApiConfig.googleAuth,
-      data: {'id_token': firebaseIdToken},
+    final res = await _requestWithQuickRetry(
+      () => _api.dio.post(
+        ApiConfig.googleAuth,
+        data: {'id_token': firebaseIdToken},
+      ),
     );
 
     final data = res.data;
@@ -99,5 +107,40 @@ class AuthRepository {
 
   Future<bool> isLoggedIn() async {
     return await _api.hasToken();
+  }
+
+  // ─── Warm-up for cold starts (Render free plan) ─────────
+  Future<void> warmupIfNeeded() async {
+    if (_didWarmup) return;
+    try {
+      await _api.dio.get(
+        '/',
+        options: Options(
+          sendTimeout: const Duration(seconds: 6),
+          receiveTimeout: const Duration(seconds: 6),
+        ),
+      );
+      _didWarmup = true;
+    } catch (_) {
+      // Ignore warmup failures; real auth calls handle retry.
+    }
+  }
+
+  Future<Response<dynamic>> _requestWithQuickRetry(
+    Future<Response<dynamic>> Function() request,
+  ) async {
+    try {
+      return await request();
+    } on DioException catch (e) {
+      final shouldRetry =
+          e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.connectionError ||
+          e.response?.statusCode == 502 ||
+          e.response?.statusCode == 503 ||
+          e.response?.statusCode == 504;
+      if (!shouldRetry) rethrow;
+      await Future.delayed(const Duration(milliseconds: 800));
+      return request();
+    }
   }
 }

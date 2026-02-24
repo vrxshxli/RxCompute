@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/rx_theme_ext.dart';
 import '../../../core/widgets/shared_widgets.dart';
@@ -20,9 +21,32 @@ class _CS extends State<ChatScreen> {
   final _tc = TextEditingController();
   final _sc = ScrollController();
   final _picker = ImagePicker();
+  final stt.SpeechToText _speech = stt.SpeechToText();
+  bool _speechReady = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _initSpeech();
+  }
+
+  Future<void> _initSpeech() async {
+    _speechReady = await _speech.initialize(
+      onStatus: (status) {
+        if ((status == 'done' || status == 'notListening') && mounted) {
+          final bloc = context.read<ChatBloc>();
+          if (bloc.state.isRecording) {
+            bloc.add(ToggleRecordingEvent());
+          }
+        }
+      },
+    );
+    if (mounted) setState(() {});
+  }
 
   @override
   void dispose() {
+    _speech.stop();
     _tc.dispose();
     _sc.dispose();
     super.dispose();
@@ -41,6 +65,29 @@ class _CS extends State<ChatScreen> {
     if (xfile == null) return;
     if (!mounted) return;
     context.read<ChatBloc>().add(UploadPrescriptionEvent(xfile.path));
+  }
+
+  Future<void> _toggleVoice(ChatState state) async {
+    if (!_speechReady) return;
+    if (state.isRecording) {
+      await _speech.stop();
+      if (mounted) context.read<ChatBloc>().add(ToggleRecordingEvent());
+      return;
+    }
+
+    context.read<ChatBloc>().add(ToggleRecordingEvent());
+    await _speech.listen(
+      onResult: (result) {
+        setState(() {
+          _tc.text = result.recognizedWords;
+          _tc.selection = TextSelection.fromPosition(TextPosition(offset: _tc.text.length));
+        });
+        if (result.finalResult && _tc.text.trim().isNotEmpty) {
+          _send();
+        }
+      },
+      listenMode: stt.ListenMode.confirmation,
+    );
   }
 
   void _scrollEnd() => WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -78,6 +125,17 @@ class _CS extends State<ChatScreen> {
                   itemBuilder: (_, i) => i == state.messages.length && state.isTyping ? _typB(r) : _build(state.messages[i], r),
                 ),
               ),
+              if (state.awaitingLanguage)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                  child: Row(
+                    children: [
+                      Expanded(child: _langBtn('Hindi', () => context.read<ChatBloc>().add(SendMessageEvent('Hindi')), r)),
+                      const SizedBox(width: 8),
+                      Expanded(child: _langBtn('English', () => context.read<ChatBloc>().add(SendMessageEvent('English')), r)),
+                    ],
+                  ),
+                ),
               Container(
                 padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
                 decoration: BoxDecoration(color: r.card, border: Border(top: BorderSide(color: r.border, width: 0.5))),
@@ -85,7 +143,7 @@ class _CS extends State<ChatScreen> {
                   top: false,
                   child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
                     GestureDetector(
-                      onTap: () => context.read<ChatBloc>().add(ToggleRecordingEvent()),
+                      onTap: () => _toggleVoice(state),
                       child: Container(
                         width: 42,
                         height: 42,
@@ -107,7 +165,7 @@ class _CS extends State<ChatScreen> {
                           onChanged: (_) => setState(() {}),
                           style: GoogleFonts.outfit(color: r.text1, fontSize: 14),
                           decoration: InputDecoration(
-                            hintText: 'Type your message...',
+                            hintText: state.awaitingLanguage ? 'Select language first...' : 'Type or speak your message...',
                             hintStyle: TextStyle(color: r.text3),
                             border: InputBorder.none,
                             enabledBorder: InputBorder.none,
@@ -256,7 +314,7 @@ class _CS extends State<ChatScreen> {
                     Container(height: 1, color: r.border, margin: const EdgeInsets.symmetric(vertical: 8)),
                     Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
                       Text('Total', style: GoogleFonts.dmSerifDisplay(color: r.text1, fontSize: 20)),
-                      Text('€${m.medicines!.fold<double>(0, (s, med) => s + med.price * med.quantity).toStringAsFixed(2)}', style: GoogleFonts.dmSerifDisplay(color: r.text1, fontSize: 20)),
+                      Text('₹${m.medicines!.fold<double>(0, (s, med) => s + med.price * med.quantity).toStringAsFixed(2)}', style: GoogleFonts.dmSerifDisplay(color: r.text1, fontSize: 20)),
                     ]),
                   ]),
                 ),
@@ -351,6 +409,23 @@ class _CS extends State<ChatScreen> {
   }
 
   String _ft(DateTime d) => '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+
+  Widget _langBtn(String label, VoidCallback onTap, Rx r) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(
+          color: r.surface,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: r.border),
+        ),
+        child: Center(
+          child: Text(label, style: GoogleFonts.outfit(color: r.text1, fontWeight: FontWeight.w600)),
+        ),
+      ),
+    );
+  }
 }
 
 class _MC extends StatefulWidget {

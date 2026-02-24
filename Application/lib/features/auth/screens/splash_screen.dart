@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../core/theme/app_colors.dart';
-import '../../../core/theme/rx_theme_ext.dart';
 import '../../../core/widgets/shared_widgets.dart';
 import '../../../config/routes.dart';
+import '../../../data/repositories/auth_repository.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -13,6 +13,7 @@ class SplashScreen extends StatefulWidget {
 
 class _SS extends State<SplashScreen> with TickerProviderStateMixin {
   late AnimationController _c, _b;
+  final AuthRepository _authRepo = AuthRepository();
 
   @override
   void initState() {
@@ -22,9 +23,15 @@ class _SS extends State<SplashScreen> with TickerProviderStateMixin {
     Future.delayed(const Duration(milliseconds: 400), () {
       if (mounted) _b.forward();
     });
-    Future.delayed(const Duration(seconds: 2), () {
-      if (mounted) Navigator.pushReplacementNamed(context, AppRoutes.onboarding);
-    });
+    _goNext();
+  }
+
+  Future<void> _goNext() async {
+    await Future.wait([
+      Future.delayed(const Duration(milliseconds: 1200)),
+      _authRepo.warmupIfNeeded().timeout(const Duration(seconds: 4), onTimeout: () {}),
+    ]);
+    if (mounted) Navigator.pushReplacementNamed(context, AppRoutes.onboarding);
   }
 
   @override

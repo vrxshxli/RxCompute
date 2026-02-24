@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/rx_theme_ext.dart';
@@ -7,7 +6,6 @@ import '../../../core/widgets/shared_widgets.dart';
 import '../../../config/routes.dart';
 import '../../../data/mock_data.dart';
 import '../../../data/models/order_model.dart';
-import '../bloc/order_bloc.dart';
 
 class PaymentScreen extends StatefulWidget {
   const PaymentScreen({super.key});
@@ -68,7 +66,7 @@ class _PayS extends State<PaymentScreen> {
             Text('Payment', style: GoogleFonts.dmSerifDisplay(color: r.text1, fontSize: 28)),
             Text('Successful', style: GoogleFonts.dmSerifDisplay(color: C.ok, fontSize: 28)),
             const SizedBox(height: 16),
-            Text('€${_total.toStringAsFixed(2)}', style: GoogleFonts.dmSerifDisplay(color: r.text1, fontSize: 36)),
+            Text('₹${_total.toStringAsFixed(2)}', style: GoogleFonts.dmSerifDisplay(color: r.text1, fontSize: 36)),
             const SizedBox(height: 12),
             Container(
               width: double.infinity,
@@ -140,15 +138,15 @@ class _PayS extends State<PaymentScreen> {
                         ]),
                       )),
                   Container(height: 1, color: r.border, margin: const EdgeInsets.symmetric(vertical: 10)),
-                  _priceRow('Subtotal', '€${_subtotal.toStringAsFixed(2)}', r),
+                  _priceRow('Subtotal', '₹${_subtotal.toStringAsFixed(2)}', r),
                   const SizedBox(height: 4),
-                  _priceRow('Delivery', '€${_delivery.toStringAsFixed(2)}', r),
+                  _priceRow('Delivery', '₹${_delivery.toStringAsFixed(2)}', r),
                   const SizedBox(height: 4),
-                  _priceRow('Discount', '-€${_discount.toStringAsFixed(2)}', r, color: C.ok),
+                  _priceRow('Discount', '-₹${_discount.toStringAsFixed(2)}', r, color: C.ok),
                   Container(height: 1, color: r.border, margin: const EdgeInsets.symmetric(vertical: 10)),
                   Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
                     Text('Total', style: GoogleFonts.dmSerifDisplay(color: r.text1, fontSize: 22)),
-                    Text('€${_total.toStringAsFixed(2)}', style: GoogleFonts.dmSerifDisplay(color: r.text1, fontSize: 22)),
+                    Text('₹${_total.toStringAsFixed(2)}', style: GoogleFonts.dmSerifDisplay(color: r.text1, fontSize: 22)),
                   ]),
                 ]),
               ),
@@ -216,7 +214,7 @@ class _PayS extends State<PaymentScreen> {
               _PayOption(key_: 'hdfc', icon: Icons.account_balance_rounded, label: 'HDFC Bank', subtitle: 'Redirect to HDFC', selected: _method == 'hdfc', onTap: () => setState(() => _method = 'hdfc')),
               const SizedBox(height: 24),
               const SecLabel('OTHER'),
-              _PayOption(key_: 'cod', icon: Icons.local_atm_rounded, label: 'Cash on Delivery', subtitle: '€1.00 COD fee applies', selected: _method == 'cod', onTap: () => setState(() => _method = 'cod')),
+              _PayOption(key_: 'cod', icon: Icons.local_atm_rounded, label: 'Cash on Delivery', subtitle: '₹1.00 COD fee applies', selected: _method == 'cod', onTap: () => setState(() => _method = 'cod')),
               const SizedBox(height: 24),
               Container(
                 padding: const EdgeInsets.all(14),
@@ -246,7 +244,7 @@ class _PayS extends State<PaymentScreen> {
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text('TOTAL', style: GoogleFonts.outfit(color: r.text3, fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 1.5)),
                   const SizedBox(height: 2),
-                  Text('€${_total.toStringAsFixed(2)}', style: GoogleFonts.dmSerifDisplay(color: r.text1, fontSize: 24)),
+                  Text('₹${_total.toStringAsFixed(2)}', style: GoogleFonts.dmSerifDisplay(color: r.text1, fontSize: 24)),
                 ]),
               ),
               SizedBox(

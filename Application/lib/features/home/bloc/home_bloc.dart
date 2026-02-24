@@ -134,7 +134,7 @@ class HomeBloc extends Bloc<HomeEvent, HomeState> {
 
       final monthlyInsight = summary.monthlyOrderCount == 0
           ? 'No order activity this month yet'
-          : '${summary.monthlyOrderCount} orders · €${summary.monthlyTotalSpend.toStringAsFixed(2)} spent this month';
+          : '${summary.monthlyOrderCount} orders · ₹${summary.monthlyTotalSpend.toStringAsFixed(2)} spent this month';
 
       emit(state.copyWith(
         user: user,

@@ -47,7 +47,7 @@ class MedicineModel {
         'image_url': imageUrl,
       };
 
-  String get formattedPrice => '€${price.toStringAsFixed(2)}';
+  String get formattedPrice => '₹${price.toStringAsFixed(2)}';
 
   String get stockStatus =>
       stock == 0 ? 'out' : stock < 10 ? 'low' : 'ok';

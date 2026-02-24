@@ -54,7 +54,7 @@ class HomeTab extends StatelessWidget {
                   trail: Icon(Icons.chevron_right_rounded, color: r.text3, size: 20),
                   onTap: () => _showAddMedicationSheet(context),
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 14),
                 _Tile(
                   ic: Icons.schedule_rounded,
                   cl: al != null && al.daysLeft <= 5 ? C.warn : C.ok,
@@ -68,7 +68,7 @@ class HomeTab extends StatelessWidget {
                   ),
                   onTap: () => _showAddMedicationSheet(context),
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 14),
                 _Tile(ic: Icons.auto_graph_rounded, cl: C.ok, t: 'MONTHLY INSIGHT', s: state.monthlyInsight),
                 const SizedBox(height: 36),
 
@@ -128,35 +128,61 @@ class HomeTab extends StatelessWidget {
         final r = context.rx;
         return Padding(
           padding: EdgeInsets.fromLTRB(16, 16, 16, MediaQuery.of(ctx).viewInsets.bottom + 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Add Medication', style: GoogleFonts.dmSerifDisplay(color: r.text1, fontSize: 24)),
-              const SizedBox(height: 12),
-              TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Medicine Name')),
-              TextField(controller: dosageCtrl, decoration: const InputDecoration(labelText: 'Dosage (example: 1 tablet)')),
-              TextField(controller: freqCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Times per day')),
-              TextField(controller: qtyCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Available units')),
-              const SizedBox(height: 16),
-              RxBtn(
-                label: 'Save Medication',
-                onPressed: () {
-                  final freq = int.tryParse(freqCtrl.text.trim()) ?? 1;
-                  final qty = int.tryParse(qtyCtrl.text.trim()) ?? 30;
-                  if (nameCtrl.text.trim().isEmpty || dosageCtrl.text.trim().isEmpty) return;
-                  context.read<HomeBloc>().add(
-                        AddMedicationEvent(
-                          medicineName: nameCtrl.text.trim(),
-                          dosageInstruction: dosageCtrl.text.trim(),
-                          frequencyPerDay: freq < 1 ? 1 : freq,
-                          quantityUnits: qty < 1 ? 1 : qty,
-                        ),
-                      );
-                  Navigator.pop(ctx);
-                },
-              ),
-            ],
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Add Medication', style: GoogleFonts.dmSerifDisplay(color: r.text1, fontSize: 24)),
+                const SizedBox(height: 4),
+                Text(
+                  'Refill alerts ke liye dosage aur daily frequency zaroor bharein.',
+                  style: GoogleFonts.outfit(color: r.text3, fontSize: 12),
+                ),
+                const SizedBox(height: 14),
+                TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Medicine Name')),
+                const SizedBox(height: 12),
+                TextField(controller: dosageCtrl, decoration: const InputDecoration(labelText: 'Dosage (example: 1 tablet)')),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: freqCtrl,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(labelText: 'Times per day'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: TextField(
+                        controller: qtyCtrl,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(labelText: 'Available units'),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                RxBtn(
+                  label: 'Save Medication',
+                  onPressed: () {
+                    final freq = int.tryParse(freqCtrl.text.trim()) ?? 1;
+                    final qty = int.tryParse(qtyCtrl.text.trim()) ?? 30;
+                    if (nameCtrl.text.trim().isEmpty || dosageCtrl.text.trim().isEmpty) return;
+                    context.read<HomeBloc>().add(
+                          AddMedicationEvent(
+                            medicineName: nameCtrl.text.trim(),
+                            dosageInstruction: dosageCtrl.text.trim(),
+                            frequencyPerDay: freq < 1 ? 1 : freq,
+                            quantityUnits: qty < 1 ? 1 : qty,
+                          ),
+                        );
+                    Navigator.pop(ctx);
+                  },
+                ),
+              ],
+            ),
           ),
         );
       },

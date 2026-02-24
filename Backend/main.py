@@ -9,6 +9,7 @@ import firebase_admin
 from firebase_admin import credentials
 
 from database import Base, engine
+from migrate import migrate as run_migrations
 from routers import (
     auth_router,
     users_router,
@@ -58,6 +59,10 @@ if not firebase_admin._apps:
 
 # Create all tables
 Base.metadata.create_all(bind=engine)
+try:
+    run_migrations()
+except Exception as e:
+    print(f"⚠ Migration warning at startup: {e}")
 
 app = FastAPI(
     title="RxCompute API",

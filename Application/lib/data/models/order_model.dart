@@ -83,7 +83,7 @@ class OrderItemModel {
         if (prescriptionFile != null) 'prescription_file': prescriptionFile,
       };
 
-  String get formattedPrice => '€${(price * quantity).toStringAsFixed(2)}';
+  String get formattedPrice => '₹${(price * quantity).toStringAsFixed(2)}';
 }
 
 class OrderModel {
@@ -124,7 +124,7 @@ class OrderModel {
         createdAt: DateTime.parse(json['created_at']),
       );
 
-  String get formattedTotal => '€${total.toStringAsFixed(2)}';
+  String get formattedTotal => '₹${total.toStringAsFixed(2)}';
 
   String get formattedDate {
     const m = [

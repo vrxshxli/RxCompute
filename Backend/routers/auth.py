@@ -67,7 +67,6 @@ def google_auth(req: GoogleAuthRequest, db: Session = Depends(get_db)):
         db.add(user)
 
     db.commit()
-    db.refresh(user)
 
     token = create_access_token({"sub": str(user.id), "email": user.email})
     return TokenResponse(
@@ -113,11 +112,11 @@ def verify_otp(req: VerifyOtpRequest, db: Session = Depends(get_db)):
     if not user:
         user = User(phone=req.phone, is_verified=True)
         db.add(user)
+        db.flush()
     else:
         user.is_verified = True
 
     db.commit()
-    db.refresh(user)
 
     token = create_access_token({"sub": str(user.id), "phone": user.phone})
     return TokenResponse(
