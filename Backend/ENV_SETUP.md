@@ -20,6 +20,15 @@ Use these keys in your local environment and Render environment.
 
 - `FIREBASE_PROJECT_ID`
 
+## Daily Refill Reminder (Render Cron)
+
+- Cron job runs daily (configured in `render.yaml`) and triggers refill reminders
+  for medicines with `days_left <= 4`.
+- Current schedule is set for **09:00 AM IST daily** (`30 3 * * *` in UTC cron).
+- Make sure cron service has:
+  - `DATABASE_URL`
+  - `FIREBASE_SERVICE_ACCOUNT`
+
 ## FIREBASE_SERVICE_ACCOUNT Format
 
 Set full Firebase service-account JSON in one line:

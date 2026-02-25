@@ -1,5 +1,3 @@
-import math
-
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -7,21 +5,22 @@ from database import get_db
 from dependencies import get_current_user
 from models.user import User
 from models.medicine import Medicine
-from models.notification import NotificationType
 from models.user_medication import UserMedication
 from schemas.medication import (
     UserMedicationCreate,
     UserMedicationOut,
     UserMedicationUpdate,
 )
-from services.notifications import create_notification, send_push_if_available
+from services.refill_reminders import (
+    calculate_days_left,
+    trigger_daily_refill_notifications_for_user,
+)
 
 router = APIRouter(prefix="/user-medications", tags=["User Medications"])
 
 
 def _to_out(record: UserMedication, med: Medicine | None) -> UserMedicationOut:
-    units_per_day = max(record.frequency_per_day, 1)
-    days_left = int(math.ceil(record.quantity_units / units_per_day))
+    days_left = calculate_days_left(record)
     return UserMedicationOut(
         id=record.id,
         medicine_id=record.medicine_id,
@@ -47,7 +46,9 @@ def list_user_medications(
         .order_by(UserMedication.created_at.desc())
         .all()
     )
-    return [_to_out(record, med) for record, med in rows]
+    result = [_to_out(record, med) for record, med in rows]
+    trigger_daily_refill_notifications_for_user(db, current_user)
+    return result
 
 
 @router.post("/", response_model=UserMedicationOut)
@@ -74,12 +75,7 @@ def create_user_medication(
     db.commit()
     db.refresh(row)
     out = _to_out(row, med)
-    if out.days_left <= 5:
-        title = "Refill Alert"
-        body = f"{out.name} runs out in {out.days_left} day(s). Reorder now."
-        create_notification(db, current_user.id, NotificationType.refill, title, body, has_action=True)
-        db.commit()
-        send_push_if_available(current_user, title, body)
+    trigger_daily_refill_notifications_for_user(db, current_user)
     return out
 
 

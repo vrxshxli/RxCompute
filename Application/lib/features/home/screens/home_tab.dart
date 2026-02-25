@@ -78,7 +78,7 @@ class HomeTab extends StatelessWidget {
                   onTrailTap: () {
                     final target = al?.medicine ?? (state.activeMeds.isNotEmpty ? state.activeMeds.first.name : null);
                     if (target == null) return;
-                    context.read<HomeBloc>().add(ReorderRefillEvent(target));
+                    context.read<HomeBloc>().add(ReorderRefillEvent(target, medicineId: al?.medicineId));
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(content: Text('Reorder placed'), backgroundColor: C.ok),
                     );

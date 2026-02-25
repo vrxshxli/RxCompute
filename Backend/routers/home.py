@@ -1,4 +1,3 @@
-import math
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends
@@ -11,13 +10,13 @@ from models.medicine import Medicine
 from models.order import Order, OrderStatus
 from models.user_medication import UserMedication
 from schemas.medication import HomeSummaryOut, UserMedicationOut
+from services.refill_reminders import calculate_days_left
 
 router = APIRouter(prefix="/home", tags=["Home"])
 
 
 def _to_out(record: UserMedication, med: Medicine | None) -> UserMedicationOut:
-    units_per_day = max(record.frequency_per_day, 1)
-    days_left = int(math.ceil(record.quantity_units / units_per_day))
+    days_left = calculate_days_left(record)
     return UserMedicationOut(
         id=record.id,
         medicine_id=record.medicine_id,

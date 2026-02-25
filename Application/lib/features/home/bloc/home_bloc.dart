@@ -38,10 +38,11 @@ class AddMedicationEvent extends HomeEvent {
 
 class ReorderRefillEvent extends HomeEvent {
   final String medicineName;
-  ReorderRefillEvent(this.medicineName);
+  final int? medicineId;
+  ReorderRefillEvent(this.medicineName, {this.medicineId});
 
   @override
-  List<Object?> get props => [medicineName];
+  List<Object?> get props => [medicineName, medicineId];
 }
 
 // ─── State ───────────────────────────────────────────────
@@ -132,6 +133,7 @@ class HomeBloc extends Bloc<HomeEvent, HomeState> {
               Refill(
                 patientId: 'self',
                 medicine: summary.refillAlert!.name,
+                medicineId: summary.refillAlert!.medicineId,
                 daysLeft: summary.refillAlert!.daysLeft,
                 risk: summary.refillAlert!.daysLeft <= 2
                     ? RefillRisk.overdue
@@ -180,7 +182,24 @@ class HomeBloc extends Bloc<HomeEvent, HomeState> {
   Future<void> _onReorderRefill(ReorderRefillEvent event, Emitter<HomeState> emit) async {
     emit(state.copyWith(isLoading: true, error: null));
     try {
-      final meds = await _medicineRepo.getMedicines(search: event.medicineName);
+      final tracked = await _medRepo.getUserMedications();
+
+      int? targetMedicineId = event.medicineId;
+      if (targetMedicineId == null) {
+        final byName = tracked.where((m) => m.name.toLowerCase() == event.medicineName.toLowerCase()).toList();
+        if (byName.isNotEmpty) {
+          targetMedicineId = byName.first.medicineId;
+        } else {
+          final contains = tracked.where((m) => m.name.toLowerCase().contains(event.medicineName.toLowerCase())).toList();
+          if (contains.isNotEmpty) {
+            targetMedicineId = contains.first.medicineId;
+          }
+        }
+      }
+
+      final meds = targetMedicineId != null
+          ? [await _medicineRepo.getMedicine(targetMedicineId)]
+          : await _medicineRepo.getMedicines(search: event.medicineName);
       if (meds.isEmpty) {
         throw Exception('Medicine not found for reorder');
       }

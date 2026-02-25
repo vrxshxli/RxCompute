@@ -21,12 +21,14 @@ enum RefillRisk { low, medium, high, overdue }
 
 class Refill {
   final String patientId, medicine;
+  final int? medicineId;
   final int daysLeft;
   final RefillRisk risk;
 
   const Refill({
     required this.patientId,
     required this.medicine,
+    this.medicineId,
     required this.daysLeft,
     required this.risk,
   });

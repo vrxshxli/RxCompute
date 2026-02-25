@@ -38,3 +38,18 @@ services:
         sync: false  # Gmail app password (not normal login password)
       - key: SMTP_FROM_EMAIL
         value: "deepakm7778@gmail.com"
+  - type: cron
+    name: rxcompute-daily-refill-reminder
+    runtime: python
+    plan: free
+    rootDir: Backend
+    schedule: "30 3 * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python jobs/daily_refill_reminder.py
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: rxcompute-db
+          property: connectionString
+      - key: FIREBASE_SERVICE_ACCOUNT
+        sync: false
