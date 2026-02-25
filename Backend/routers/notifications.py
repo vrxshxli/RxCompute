@@ -66,12 +66,7 @@ def mark_all_read(
     return {"message": "All notifications marked as read"}
 
 
-@router.post("/test-delivery")
-def test_delivery(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Create one test notification and attempt both push + email delivery."""
+def _run_test_delivery(current_user: User, db: Session):
     title = "RxCompute Test Notification"
     body = "This is a test for push/email delivery channels."
     create_notification(
@@ -96,3 +91,21 @@ def test_delivery(
         "email_sent": email_ok,
         "note": "Check Render logs for push/email send errors if delivery fails.",
     }
+
+
+@router.post("/test-delivery")
+def test_delivery_post(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Create one test notification and attempt both push + email delivery."""
+    return _run_test_delivery(current_user, db)
+
+
+@router.get("/test-delivery")
+def test_delivery_get(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Browser-friendly test route for push/email delivery."""
+    return _run_test_delivery(current_user, db)
