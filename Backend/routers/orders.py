@@ -9,7 +9,9 @@ from dependencies import get_current_user
 from models.user import User
 from models.order import Order, OrderItem, OrderStatus
 from models.medicine import Medicine
+from models.notification import NotificationType
 from schemas.order import OrderCreate, OrderOut, OrderStatusUpdate
+from services.notifications import create_notification, send_order_email, send_push_if_available
 
 router = APIRouter(prefix="/orders", tags=["Orders"])
 
@@ -112,6 +114,13 @@ def create_order(
 
     db.commit()
     db.refresh(order)
+
+    title = "Order Placed"
+    body = f"{order.order_uid} placed successfully. Total {order.total:.2f}"
+    create_notification(db, current_user.id, NotificationType.order, title, body, has_action=True)
+    db.commit()
+    send_push_if_available(current_user, title, body)
+    send_order_email(current_user, order)
     return order
 
 
@@ -133,4 +142,12 @@ def update_order_status(
     order.status = data.status
     db.commit()
     db.refresh(order)
+
+    if data.status in {OrderStatus.confirmed.value, OrderStatus.dispatched.value, OrderStatus.delivered.value}:
+        title = "Order Update"
+        body = f"{order.order_uid} status is now {data.status.upper()}"
+        create_notification(db, current_user.id, NotificationType.order, title, body, has_action=True)
+        db.commit()
+        send_push_if_available(current_user, title, body)
+        send_order_email(current_user, order)
     return order

@@ -1,6 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:dio/dio.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../providers/api_provider.dart';
 import '../../config/api_config.dart';
 
@@ -11,6 +12,7 @@ class AuthRepository {
     scopes: ['email', 'profile'],
   );
   static bool _didWarmup = false;
+  static const String _loggedInKey = 'is_logged_in';
 
   // ─── Phone OTP ────────────────────────────────────────────
   Future<Map<String, dynamic>> sendOtp(String phone) async {
@@ -33,6 +35,7 @@ class AuthRepository {
     final data = res.data;
     // Save JWT token from backend
     await _api.saveToken(data['access_token']);
+    await _setLoggedInFlag(true);
     return data;
   }
 
@@ -73,6 +76,7 @@ class AuthRepository {
     final data = res.data;
     // Save our backend JWT token
     await _api.saveToken(data['access_token']);
+    await _setLoggedInFlag(true);
     return data;
   }
 
@@ -103,10 +107,17 @@ class AuthRepository {
       await _googleSignIn.signOut();
     } catch (_) {}
     await _api.clearToken();
+    await _setLoggedInFlag(false);
   }
 
   Future<bool> isLoggedIn() async {
-    return await _api.hasToken();
+    final tokenPresent = await _api.hasToken();
+    if (tokenPresent) {
+      await _setLoggedInFlag(true);
+      return true;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_loggedInKey) ?? false;
   }
 
   // ─── Warm-up for cold starts (Render free plan) ─────────
@@ -142,5 +153,10 @@ class AuthRepository {
       await Future.delayed(const Duration(milliseconds: 800));
       return request();
     }
+  }
+
+  Future<void> _setLoggedInFlag(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_loggedInKey, value);
   }
 }

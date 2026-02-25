@@ -1,4 +1,4 @@
-import '../../config/api_config.dart';
+﻿import '../../config/api_config.dart';
 import '../models/user_medication_model.dart';
 import '../providers/api_provider.dart';
 
@@ -6,7 +6,7 @@ class UserMedicationRepository {
   final ApiProvider _api = ApiProvider();
 
   Future<List<UserMedicationModel>> getUserMedications() async {
-    final res = await _api.dio.get(ApiConfig.userMedications);
+    final res = await _api.dio.get('${ApiConfig.userMedications}/');
     return (res.data as List).map((e) => UserMedicationModel.fromJson(e)).toList();
   }
 
@@ -18,7 +18,7 @@ class UserMedicationRepository {
     required int quantityUnits,
   }) async {
     final res = await _api.dio.post(
-      ApiConfig.userMedications,
+      '${ApiConfig.userMedications}/',
       data: {
         if (medicineId != null) 'medicine_id': medicineId,
         if (customName != null && customName.trim().isNotEmpty) 'custom_name': customName.trim(),

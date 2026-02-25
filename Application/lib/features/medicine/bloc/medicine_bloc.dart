@@ -79,8 +79,8 @@ class MedicineBloc extends Bloc<MedicineEvent, MedicineState> {
           .map((m) => ActiveMed(
                 name: m.name,
                 dosage: '${m.dosageInstruction} · ${m.frequencyPerDay}x/day',
-                remaining: m.quantityUnits,
-                total: (m.daysLeft * m.frequencyPerDay).clamp(1, 2000),
+                remaining: m.daysLeft,
+                total: (m.daysLeft > 30 ? m.daysLeft : 30),
               ))
           .toList();
       final low = active.where((m) => m.remaining <= 5).toList();

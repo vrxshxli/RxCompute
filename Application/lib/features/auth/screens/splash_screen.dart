@@ -31,7 +31,13 @@ class _SS extends State<SplashScreen> with TickerProviderStateMixin {
       Future.delayed(const Duration(milliseconds: 1200)),
       _authRepo.warmupIfNeeded().timeout(const Duration(seconds: 4), onTimeout: () {}),
     ]);
-    if (mounted) Navigator.pushReplacementNamed(context, AppRoutes.onboarding);
+    final loggedIn = await _authRepo.isLoggedIn();
+    if (!mounted) return;
+    if (loggedIn) {
+      Navigator.pushReplacementNamed(context, AppRoutes.home);
+      return;
+    }
+    Navigator.pushReplacementNamed(context, AppRoutes.onboarding);
   }
 
   @override

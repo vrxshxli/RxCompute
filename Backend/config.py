@@ -15,3 +15,11 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
 # Firebase — set GOOGLE_APPLICATION_CREDENTIALS env var on Render
 # pointing to the service account JSON, or use FIREBASE_CONFIG env var.
 FIREBASE_PROJECT_ID = os.getenv("FIREBASE_PROJECT_ID", "")
+
+# Custom SMTP config for order emails
+# Default sender kept as requested.
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER = os.getenv("SMTP_USER", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+SMTP_FROM_EMAIL = os.getenv("SMTP_FROM_EMAIL", "deepakm7778@gmail.com")

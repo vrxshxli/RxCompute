@@ -13,7 +13,14 @@ class HomeTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final r = context.rx;
-    return BlocBuilder<HomeBloc, HomeState>(
+    return BlocConsumer<HomeBloc, HomeState>(
+      listener: (context, state) {
+        if (state.error != null && state.error!.isNotEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(state.error!), backgroundColor: C.err),
+          );
+        }
+      },
       builder: (context, state) {
         final p = state.user;
         final al = state.alerts.isNotEmpty ? state.alerts.first : null;
@@ -53,6 +60,7 @@ class HomeTab extends StatelessWidget {
                   s: state.activeMeds.isEmpty ? 'No medications yet. Tap to add.' : '${state.activeMeds.length} medications scheduled',
                   trail: Icon(Icons.chevron_right_rounded, color: r.text3, size: 20),
                   onTap: () => _showAddMedicationSheet(context),
+                  onTrailTap: () => _showMedicationListSheet(context, state.activeMeds),
                 ),
                 const SizedBox(height: 14),
                 _Tile(
@@ -66,10 +74,24 @@ class HomeTab extends StatelessWidget {
                     decoration: BoxDecoration(color: C.rx.withOpacity(r.dark ? 0.08 : 0.05), borderRadius: BorderRadius.circular(8)),
                     child: Text('REORDER', style: GoogleFonts.outfit(color: C.rx, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1)),
                   ),
-                  onTap: () => _showAddMedicationSheet(context),
+                  onTap: () => _showRefillListSheet(context, state),
+                  onTrailTap: () {
+                    final target = al?.medicine ?? (state.activeMeds.isNotEmpty ? state.activeMeds.first.name : null);
+                    if (target == null) return;
+                    context.read<HomeBloc>().add(ReorderRefillEvent(target));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Reorder placed'), backgroundColor: C.ok),
+                    );
+                  },
                 ),
                 const SizedBox(height: 14),
-                _Tile(ic: Icons.auto_graph_rounded, cl: C.ok, t: 'MONTHLY INSIGHT', s: state.monthlyInsight),
+                _Tile(
+                  ic: Icons.auto_graph_rounded,
+                  cl: C.ok,
+                  t: 'MONTHLY INSIGHT',
+                  s: state.monthlyInsight,
+                  onTap: () => _showMonthlyInsightsSheet(context, state),
+                ),
                 const SizedBox(height: 36),
 
                 const SecLabel('QUICK ACTIONS'),
@@ -188,6 +210,172 @@ class HomeTab extends StatelessWidget {
       },
     );
   }
+
+  Future<void> _showMedicationListSheet(BuildContext context, List<dynamic> meds) async {
+    final r = context.rx;
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => Container(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.75),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('My Medications', style: GoogleFonts.dmSerifDisplay(color: r.text1, fontSize: 24)),
+            const SizedBox(height: 12),
+            Expanded(
+              child: meds.isEmpty
+                  ? const Center(child: Text('No medications added yet'))
+                  : ListView.separated(
+                      itemCount: meds.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 10),
+                      itemBuilder: (_, i) {
+                        final m = meds[i];
+                        return RxCard(
+                          padding: const EdgeInsets.all(14),
+                          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            Text(m.name, style: GoogleFonts.outfit(color: r.text1, fontSize: 14, fontWeight: FontWeight.w600)),
+                            const SizedBox(height: 4),
+                            Text(m.dosage, style: GoogleFonts.outfit(color: r.text3, fontSize: 12)),
+                          ]),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showRefillListSheet(BuildContext context, HomeState state) async {
+    final r = context.rx;
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => Container(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.78),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Refill Alerts', style: GoogleFonts.dmSerifDisplay(color: r.text1, fontSize: 24)),
+            const SizedBox(height: 12),
+            Expanded(
+              child: ListView(
+                children: [
+                  ...state.alerts.map(
+                    (a) => Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: RxCard(
+                        padding: const EdgeInsets.all(14),
+                        child: Row(
+                          children: [
+                            IcoBlock(icon: Icons.schedule_rounded, color: a.daysLeft <= 5 ? C.warn : C.ok),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                Text(a.medicine, style: GoogleFonts.outfit(color: r.text1, fontSize: 14, fontWeight: FontWeight.w600)),
+                                Text('${a.daysLeft} days left', style: GoogleFonts.outfit(color: r.text3, fontSize: 12)),
+                              ]),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (state.alerts.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 12),
+                      child: Text('No refill alerts right now.'),
+                    ),
+                  const SecLabel('EXISTING MEDICATIONS'),
+                  ...state.activeMeds.map(
+                    (m) => Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: RxCard(
+                        padding: const EdgeInsets.all(14),
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Text(m.name, style: GoogleFonts.outfit(color: r.text1, fontSize: 14, fontWeight: FontWeight.w600)),
+                          const SizedBox(height: 3),
+                          Text(m.dosage, style: GoogleFonts.outfit(color: r.text3, fontSize: 12)),
+                        ]),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showMonthlyInsightsSheet(BuildContext context, HomeState state) async {
+    final r = context.rx;
+    final delivered = state.orders.where((o) => o.status.name == 'delivered').toList();
+    final buckets = <double>[0, 0, 0, 0];
+    for (var i = 0; i < state.orders.length; i++) {
+      buckets[i % 4] += state.orders[i].total;
+    }
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => Container(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Monthly Insights', style: GoogleFonts.dmSerifDisplay(color: r.text1, fontSize: 24)),
+            const SizedBox(height: 10),
+            RxCard(
+              padding: const EdgeInsets.all(14),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: List.generate(4, (i) {
+                  final max = buckets.fold<double>(0, (p, c) => p > c ? p : c);
+                  final h = max == 0 ? 8.0 : (70 * (buckets[i] / max)).clamp(8.0, 70.0);
+                  return Expanded(
+                    child: Column(
+                      children: [
+                        Container(width: 22, height: h, decoration: BoxDecoration(color: C.compute, borderRadius: BorderRadius.circular(6))),
+                        const SizedBox(height: 6),
+                        Text('W${i + 1}', style: GoogleFonts.outfit(color: r.text3, fontSize: 10)),
+                      ],
+                    ),
+                  );
+                }),
+              ),
+            ),
+            const SizedBox(height: 14),
+            Expanded(
+              child: delivered.isEmpty
+                  ? const Center(child: Text('No monthly order list yet'))
+                  : ListView.separated(
+                      itemCount: delivered.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 10),
+                      itemBuilder: (_, i) {
+                        final o = delivered[i];
+                        return RxCard(
+                          padding: const EdgeInsets.all(14),
+                          child: Row(
+                            children: [
+                              Expanded(child: Mono(o.orderUid, size: 12, color: r.text1)),
+                              Text(o.formattedTotal, style: GoogleFonts.outfit(color: r.text1, fontWeight: FontWeight.w700)),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _Tile extends StatelessWidget {
@@ -197,7 +385,8 @@ class _Tile extends StatelessWidget {
   final Color? sColor;
   final Widget? trail;
   final VoidCallback? onTap;
-  const _Tile({required this.ic, required this.cl, required this.t, required this.s, this.sColor, this.trail, this.onTap});
+  final VoidCallback? onTrailTap;
+  const _Tile({required this.ic, required this.cl, required this.t, required this.s, this.sColor, this.trail, this.onTap, this.onTrailTap});
   @override
   Widget build(BuildContext context) {
     final r = context.rx;
@@ -214,7 +403,11 @@ class _Tile extends StatelessWidget {
               Text(s, style: GoogleFonts.outfit(color: sColor ?? r.text2, fontSize: 13)),
             ]),
           ),
-          if (trail != null) trail!,
+          if (trail != null)
+            GestureDetector(
+              onTap: onTrailTap,
+              child: trail!,
+            ),
         ]),
       ),
     );

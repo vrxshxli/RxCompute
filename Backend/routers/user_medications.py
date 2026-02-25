@@ -7,12 +7,14 @@ from database import get_db
 from dependencies import get_current_user
 from models.user import User
 from models.medicine import Medicine
+from models.notification import NotificationType
 from models.user_medication import UserMedication
 from schemas.medication import (
     UserMedicationCreate,
     UserMedicationOut,
     UserMedicationUpdate,
 )
+from services.notifications import create_notification, send_push_if_available
 
 router = APIRouter(prefix="/user-medications", tags=["User Medications"])
 
@@ -71,7 +73,14 @@ def create_user_medication(
     db.add(row)
     db.commit()
     db.refresh(row)
-    return _to_out(row, med)
+    out = _to_out(row, med)
+    if out.days_left <= 5:
+        title = "Refill Alert"
+        body = f"{out.name} runs out in {out.days_left} day(s). Reorder now."
+        create_notification(db, current_user.id, NotificationType.refill, title, body, has_action=True)
+        db.commit()
+        send_push_if_available(current_user, title, body)
+    return out
 
 
 @router.put("/{medication_id}", response_model=UserMedicationOut)

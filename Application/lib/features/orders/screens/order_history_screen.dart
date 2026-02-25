@@ -36,7 +36,7 @@ class OrderHistoryScreen extends StatelessWidget {
                             ? C.err
                             : C.warn;
                     return GestureDetector(
-                      onTap: () => Navigator.pushNamed(context, AppRoutes.orderTracking),
+                      onTap: () => Navigator.pushNamed(context, AppRoutes.orderTracking, arguments: o),
                       child: Container(
                         margin: const EdgeInsets.only(bottom: 12),
                         padding: const EdgeInsets.all(18),

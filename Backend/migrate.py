@@ -35,6 +35,7 @@ def migrate():
         migrations = [
             ("google_id", "VARCHAR(255) UNIQUE"),
             ("profile_picture", "TEXT"),
+            ("push_token", "VARCHAR(255)"),
         ]
 
         for col_name, col_type in migrations:

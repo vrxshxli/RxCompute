@@ -33,7 +33,7 @@ class Refill {
 }
 
 /// Chat message types
-enum ChatMessageType { text, meds, safety, confirmed, typing }
+enum ChatMessageType { text, meds, options, safety, confirmed, typing }
 
 class ChatMessage {
   final String id, text;

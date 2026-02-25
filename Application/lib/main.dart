@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 
 import 'config/routes.dart';
 import 'core/theme/app_theme.dart';
@@ -15,6 +16,10 @@ import 'features/medicine/bloc/medicine_bloc.dart';
 import 'features/orders/bloc/order_bloc.dart';
 import 'features/profile/bloc/profile_bloc.dart';
 
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  await Firebase.initializeApp();
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -25,6 +30,12 @@ void main() async {
     debugPrint('⚠️ Firebase init failed: $e');
     debugPrint('   Make sure google-services.json is in android/app/');
   }
+  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+  await FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(
+    alert: true,
+    badge: true,
+    sound: true,
+  );
 
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(statusBarColor: Colors.transparent),

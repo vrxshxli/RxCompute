@@ -15,6 +15,7 @@ class UserRepository {
     int? age,
     String? gender,
     String? email,
+    String? pushToken,
     String? allergies,
     String? conditions,
   }) async {
@@ -23,6 +24,7 @@ class UserRepository {
     if (age != null) data['age'] = age;
     if (gender != null) data['gender'] = gender;
     if (email != null) data['email'] = email;
+    if (pushToken != null) data['push_token'] = pushToken;
     if (allergies != null) data['allergies'] = allergies;
     if (conditions != null) data['conditions'] = conditions;
 

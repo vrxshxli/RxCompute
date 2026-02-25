@@ -14,6 +14,7 @@ class User(Base):
     age = Column(Integer, nullable=True)
     gender = Column(String(10), nullable=True)
     email = Column(String(150), nullable=True)
+    push_token = Column(String(255), nullable=True)
     profile_picture = Column(Text, nullable=True)
     allergies = Column(Text, nullable=True)       # comma-separated
     conditions = Column(Text, nullable=True)       # comma-separated

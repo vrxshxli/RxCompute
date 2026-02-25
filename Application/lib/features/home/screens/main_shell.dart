@@ -1,7 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/rx_theme_ext.dart';
+import '../../../data/repositories/user_repository.dart';
 import 'home_tab.dart';
 import '../../chat/screens/chat_screen.dart';
 import '../../medicine/screens/medicine_brain_screen.dart';
@@ -16,6 +20,52 @@ class MainShell extends StatefulWidget {
 class _MS extends State<MainShell> {
   int _i = 0;
   final _screens = const [HomeTab(), ChatScreen(), MedicineBrainScreen(), ProfileScreen()];
+  final UserRepository _userRepository = UserRepository();
+  StreamSubscription<String>? _tokenSub;
+  StreamSubscription<RemoteMessage>? _onMessageSub;
+  StreamSubscription<RemoteMessage>? _onMessageOpenSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _initPushToken();
+  }
+
+  Future<void> _initPushToken() async {
+    try {
+      final messaging = FirebaseMessaging.instance;
+      await messaging.requestPermission();
+      final token = await messaging.getToken();
+      if (token != null && token.isNotEmpty) {
+        await _userRepository.updateProfile(pushToken: token);
+      }
+      _tokenSub = FirebaseMessaging.instance.onTokenRefresh.listen((newToken) async {
+        if (newToken.isNotEmpty) {
+          await _userRepository.updateProfile(pushToken: newToken);
+        }
+      });
+      _onMessageSub = FirebaseMessaging.onMessage.listen((message) {
+        if (!mounted) return;
+        final title = message.notification?.title ?? 'RxCompute';
+        final body = message.notification?.body ?? 'New update available';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$title: $body')),
+        );
+      });
+      _onMessageOpenSub = FirebaseMessaging.onMessageOpenedApp.listen((_) {
+        if (!mounted) return;
+        setState(() => _i = 0);
+      });
+    } catch (_) {}
+  }
+
+  @override
+  void dispose() {
+    _tokenSub?.cancel();
+    _onMessageSub?.cancel();
+    _onMessageOpenSub?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {

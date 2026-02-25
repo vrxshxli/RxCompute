@@ -5,6 +5,7 @@ import '../../../data/models/order_model.dart';
 import '../../../data/models/notification_model.dart';
 import '../../../data/models/user_model.dart';
 import '../../../data/repositories/home_repository.dart';
+import '../../../data/repositories/medicine_repository.dart';
 import '../../../data/repositories/notification_repository.dart';
 import '../../../data/repositories/order_repository.dart';
 import '../../../data/repositories/user_medication_repository.dart';
@@ -33,6 +34,14 @@ class AddMedicationEvent extends HomeEvent {
 
   @override
   List<Object?> get props => [medicineName, dosageInstruction, frequencyPerDay, quantityUnits];
+}
+
+class ReorderRefillEvent extends HomeEvent {
+  final String medicineName;
+  ReorderRefillEvent(this.medicineName);
+
+  @override
+  List<Object?> get props => [medicineName];
 }
 
 // ─── State ───────────────────────────────────────────────
@@ -87,12 +96,14 @@ class HomeBloc extends Bloc<HomeEvent, HomeState> {
   final UserRepository _userRepo = UserRepository();
   final UserMedicationRepository _medRepo = UserMedicationRepository();
   final OrderRepository _orderRepo = OrderRepository();
+  final MedicineRepository _medicineRepo = MedicineRepository();
   final NotificationRepository _notificationRepo = NotificationRepository();
   final HomeRepository _homeRepo = HomeRepository();
 
   HomeBloc() : super(const HomeState()) {
     on<LoadHomeDataEvent>(_onLoad);
     on<AddMedicationEvent>(_onAddMedication);
+    on<ReorderRefillEvent>(_onReorderRefill);
   }
 
   Future<void> _onLoad(LoadHomeDataEvent event, Emitter<HomeState> emit) async {
@@ -109,8 +120,8 @@ class HomeBloc extends Bloc<HomeEvent, HomeState> {
             (m) => ActiveMed(
               name: m.name,
               dosage: '${m.dosageInstruction} · ${m.frequencyPerDay}x/day',
-              remaining: m.quantityUnits,
-              total: (m.daysLeft * m.frequencyPerDay).clamp(1, 2000),
+              remaining: m.daysLeft,
+              total: (m.daysLeft > 30 ? m.daysLeft : 30),
             ),
           )
           .toList();
@@ -159,6 +170,34 @@ class HomeBloc extends Bloc<HomeEvent, HomeState> {
         dosageInstruction: event.dosageInstruction,
         frequencyPerDay: event.frequencyPerDay,
         quantityUnits: event.quantityUnits,
+      );
+      add(LoadHomeDataEvent());
+    } catch (e) {
+      emit(state.copyWith(isLoading: false, error: e.toString()));
+    }
+  }
+
+  Future<void> _onReorderRefill(ReorderRefillEvent event, Emitter<HomeState> emit) async {
+    emit(state.copyWith(isLoading: true, error: null));
+    try {
+      final meds = await _medicineRepo.getMedicines(search: event.medicineName);
+      if (meds.isEmpty) {
+        throw Exception('Medicine not found for reorder');
+      }
+      final med = meds.first;
+
+      await _orderRepo.createOrder(
+        items: [
+          {
+            'medicine_id': med.id,
+            'name': med.name,
+            'quantity': 1,
+            'price': med.price,
+            'dosage_instruction': 'As needed',
+            'strips_count': 1,
+          },
+        ],
+        paymentMethod: 'cod',
       );
       add(LoadHomeDataEvent());
     } catch (e) {

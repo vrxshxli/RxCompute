@@ -6,6 +6,7 @@ class UserModel {
   final int? age;
   final String? gender;
   final String? email;
+  final String? pushToken;
   final String? profilePicture;
   final String? allergies;
   final String? conditions;
@@ -20,6 +21,7 @@ class UserModel {
     this.age,
     this.gender,
     this.email,
+    this.pushToken,
     this.profilePicture,
     this.allergies,
     this.conditions,
@@ -35,6 +37,7 @@ class UserModel {
         age: json['age'],
         gender: json['gender'],
         email: json['email'],
+        pushToken: json['push_token'],
         profilePicture: json['profile_picture'],
         allergies: json['allergies'],
         conditions: json['conditions'],

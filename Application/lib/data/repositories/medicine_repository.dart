@@ -1,4 +1,4 @@
-import '../providers/api_provider.dart';
+﻿import '../providers/api_provider.dart';
 import '../models/medicine_model.dart';
 import '../../config/api_config.dart';
 
@@ -9,7 +9,7 @@ class MedicineRepository {
     final params = <String, dynamic>{};
     if (search != null && search.isNotEmpty) params['search'] = search;
 
-    final res = await _api.dio.get(ApiConfig.medicines, queryParameters: params);
+    final res = await _api.dio.get('${ApiConfig.medicines}/', queryParameters: params);
     return (res.data as List)
         .map((e) => MedicineModel.fromJson(e))
         .toList();

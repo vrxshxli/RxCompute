@@ -4,18 +4,40 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/rx_theme_ext.dart';
 import '../../../core/widgets/shared_widgets.dart';
+import '../../../data/models/order_model.dart';
 import '../bloc/order_bloc.dart';
 
-class OrderTrackingScreen extends StatelessWidget {
+class OrderTrackingScreen extends StatefulWidget {
   const OrderTrackingScreen({super.key});
+
+  @override
+  State<OrderTrackingScreen> createState() => _OrderTrackingScreenState();
+}
+
+class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
+  int? _selectedOrderId;
+  bool _argsRead = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_argsRead) return;
+    _argsRead = true;
+    final args = ModalRoute.of(context)?.settings.arguments;
+    if (args is OrderModel) {
+      _selectedOrderId = args.id;
+    } else if (args is int) {
+      _selectedOrderId = args;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final r = context.rx;
     return BlocBuilder<OrderBloc, OrderState>(
       builder: (context, state) {
-        final o = state.activeOrder;
-        if (o == null) {
+        final orders = state.orders;
+        if (orders.isEmpty) {
           return Scaffold(
             backgroundColor: r.bg,
             appBar: AppBar(
@@ -26,12 +48,28 @@ class OrderTrackingScreen extends StatelessWidget {
             body: const EmptyState(icon: Icons.local_shipping_outlined, title: 'No active order'),
           );
         }
+        OrderModel? selected;
+        if (_selectedOrderId != null) {
+          for (final order in orders) {
+            if (order.id == _selectedOrderId) {
+              selected = order;
+              break;
+            }
+          }
+        }
+        if (selected == null) {
+          return _buildOrderList(context, r, orders);
+        }
+        final o = selected;
         final steps = _stepsForStatus(o.status.name);
         return Scaffold(
           backgroundColor: r.bg,
           appBar: AppBar(
             backgroundColor: r.bg,
-            leading: IconButton(icon: Icon(Icons.arrow_back_rounded, color: r.text1), onPressed: () => Navigator.pop(context)),
+            leading: IconButton(
+              icon: Icon(Icons.arrow_back_rounded, color: r.text1),
+              onPressed: () => setState(() => _selectedOrderId = null),
+            ),
             title: Text('TRACK ORDER', style: GoogleFonts.outfit(color: r.text1, fontSize: 13, fontWeight: FontWeight.w700, letterSpacing: 2)),
           ),
           body: SingleChildScrollView(
@@ -111,6 +149,45 @@ class OrderTrackingScreen extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+
+  Widget _buildOrderList(BuildContext context, Rx r, List<OrderModel> orders) {
+    return Scaffold(
+      backgroundColor: r.bg,
+      appBar: AppBar(
+        backgroundColor: r.bg,
+        leading: IconButton(icon: Icon(Icons.arrow_back_rounded, color: r.text1), onPressed: () => Navigator.pop(context)),
+        title: Text('TRACK ORDER', style: GoogleFonts.outfit(color: r.text1, fontSize: 13, fontWeight: FontWeight.w700, letterSpacing: 2)),
+      ),
+      body: ListView.builder(
+        padding: const EdgeInsets.fromLTRB(24, 10, 24, 24),
+        itemCount: orders.length,
+        itemBuilder: (_, i) {
+          final o = orders[i];
+          final statusColor = o.status == OrderStatus.delivered ? C.ok : o.status == OrderStatus.cancelled ? C.err : C.warn;
+          return GestureDetector(
+            onTap: () => setState(() => _selectedOrderId = o.id),
+            child: Container(
+              margin: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(color: r.card, borderRadius: BorderRadius.circular(12), border: Border.all(color: r.border.withOpacity(0.4))),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Mono(o.orderUid, color: r.text1),
+                      const SizedBox(height: 4),
+                      Text('${o.items.length} items · ${o.formattedTotal}', style: GoogleFonts.outfit(color: r.text2, fontSize: 13)),
+                    ]),
+                  ),
+                  RxBadge(text: o.status.label, color: statusColor),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
     );
   }
 

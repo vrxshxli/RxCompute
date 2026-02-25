@@ -1,4 +1,4 @@
-import '../providers/api_provider.dart';
+﻿import '../providers/api_provider.dart';
 import '../models/order_model.dart';
 import '../../config/api_config.dart';
 
@@ -6,7 +6,7 @@ class OrderRepository {
   final ApiProvider _api = ApiProvider();
 
   Future<List<OrderModel>> getOrders() async {
-    final res = await _api.dio.get(ApiConfig.orders);
+    final res = await _api.dio.get('${ApiConfig.orders}/');
     return (res.data as List)
         .map((e) => OrderModel.fromJson(e))
         .toList();
@@ -22,7 +22,7 @@ class OrderRepository {
     String? pharmacy,
     String? paymentMethod,
   }) async {
-    final res = await _api.dio.post(ApiConfig.orders, data: {
+    final res = await _api.dio.post('${ApiConfig.orders}/', data: {
       'items': items,
       if (pharmacy != null) 'pharmacy': pharmacy,
       if (paymentMethod != null) 'payment_method': paymentMethod,

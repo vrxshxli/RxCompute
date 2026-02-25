@@ -209,6 +209,8 @@ class _CS extends State<ChatScreen> {
     switch (m.type) {
       case ChatMessageType.meds:
         return _medR(m, r);
+      case ChatMessageType.options:
+        return _optR(m, r);
       case ChatMessageType.safety:
         return _safR(m, r);
       case ChatMessageType.confirmed:
@@ -286,7 +288,15 @@ class _CS extends State<ChatScreen> {
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text(m.text, style: GoogleFonts.outfit(color: r.text2, fontSize: 12, fontWeight: FontWeight.w600, letterSpacing: 0.5)),
                 const SizedBox(height: 14),
-                ...m.medicines!.map((med) => _MC(med: med)),
+                ...m.medicines!.map(
+                  (med) => _MC(
+                    med: med,
+                    onQuantityChanged: (q) {
+                      setState(() {});
+                      context.read<ChatBloc>().add(UpdateDraftStripsEvent(q));
+                    },
+                  ),
+                ),
                 const SizedBox(height: 10),
                 Container(
                   padding: const EdgeInsets.all(10),
@@ -308,7 +318,7 @@ class _CS extends State<ChatScreen> {
                           padding: const EdgeInsets.only(bottom: 6),
                           child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
                             Expanded(child: Text('${med.name} × ${med.quantity}', style: TextStyle(color: r.text2, fontSize: 13), overflow: TextOverflow.ellipsis)),
-                            Text(med.formattedPrice, style: TextStyle(color: r.text2, fontSize: 13)),
+                            Text('₹${(med.price * med.quantity).toStringAsFixed(2)}', style: TextStyle(color: r.text2, fontSize: 13)),
                           ]),
                         )),
                     Container(height: 1, color: r.border, margin: const EdgeInsets.symmetric(vertical: 8)),
@@ -322,6 +332,63 @@ class _CS extends State<ChatScreen> {
                 RxBtn(label: 'Continue in Chat', onPressed: () => context.read<ChatBloc>().add(SendMessageEvent('yes'))),
                 const SizedBox(height: 6),
                 Center(child: TextButton(onPressed: () {}, child: Text('CANCEL', style: GoogleFonts.outfit(color: r.text3, fontSize: 11, fontWeight: FontWeight.w600, letterSpacing: 1)))),
+              ]),
+            ),
+          ),
+        ]),
+      );
+
+  Widget _optR(ChatMessage m, Rx r) => Padding(
+        padding: const EdgeInsets.only(bottom: 18, right: 20),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          _av(),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: r.card,
+                borderRadius: const BorderRadius.only(topLeft: Radius.circular(4), topRight: Radius.circular(16), bottomLeft: Radius.circular(16), bottomRight: Radius.circular(16)),
+                border: Border.all(color: r.border.withOpacity(0.4)),
+              ),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(m.text, style: GoogleFonts.outfit(color: r.text2, fontSize: 13, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 12),
+                ...m.medicines!.asMap().entries.map((entry) {
+                  final idx = entry.key;
+                  final med = entry.value;
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(color: r.surface, borderRadius: BorderRadius.circular(10)),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('${idx + 1}. ${med.name}', style: GoogleFonts.outfit(color: r.text1, fontSize: 13, fontWeight: FontWeight.w600)),
+                              const SizedBox(height: 4),
+                              Text('PZN: ${med.pzn} · ${med.formattedPrice}', style: GoogleFonts.outfit(color: r.text3, fontSize: 11)),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        SizedBox(
+                          width: 88,
+                          child: RxBtn(
+                            label: 'Select',
+                            onPressed: () => context.read<ChatBloc>().add(SelectMedicineEvent(med)),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }),
+                Text(
+                  'Type option number (1, 2, 3...) ya Select button dabao.',
+                  style: GoogleFonts.outfit(color: r.text3, fontSize: 11),
+                ),
               ]),
             ),
           ),
@@ -430,7 +497,8 @@ class _CS extends State<ChatScreen> {
 
 class _MC extends StatefulWidget {
   final MedicineModel med;
-  const _MC({required this.med});
+  final ValueChanged<int>? onQuantityChanged;
+  const _MC({required this.med, this.onQuantityChanged});
   @override
   State<_MC> createState() => _MCS();
 }
@@ -480,10 +548,18 @@ class _MCS extends State<_MC> {
         const SizedBox(height: 10),
         Row(mainAxisAlignment: MainAxisAlignment.end, children: [
           _qb(Icons.remove, () {
-            if (_q > 1) setState(() => _q--);
+            if (_q > 1) {
+              setState(() => _q--);
+              widget.med.quantity = _q;
+              widget.onQuantityChanged?.call(_q);
+            }
           }),
           Padding(padding: const EdgeInsets.symmetric(horizontal: 14), child: Text('$_q', style: GoogleFonts.outfit(color: r.text1, fontSize: 15, fontWeight: FontWeight.w600))),
-          _qb(Icons.add, () => setState(() => _q++)),
+          _qb(Icons.add, () {
+            setState(() => _q++);
+            widget.med.quantity = _q;
+            widget.onQuantityChanged?.call(_q);
+          }),
         ]),
       ]),
     );
