@@ -3,9 +3,14 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from dependencies import get_current_user
+from models.notification import Notification, NotificationType
 from models.user import User
-from models.notification import Notification
 from schemas.notification import NotificationOut
+from services.notifications import (
+    create_notification,
+    send_push_if_available,
+    send_test_email,
+)
 
 router = APIRouter(prefix="/notifications", tags=["Notifications"])
 
@@ -59,3 +64,35 @@ def mark_all_read(
     ).update({"is_read": True})
     db.commit()
     return {"message": "All notifications marked as read"}
+
+
+@router.post("/test-delivery")
+def test_delivery(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Create one test notification and attempt both push + email delivery."""
+    title = "RxCompute Test Notification"
+    body = "This is a test for push/email delivery channels."
+    create_notification(
+        db,
+        current_user.id,
+        NotificationType.general,
+        title,
+        body,
+        has_action=False,
+    )
+    db.commit()
+    send_push_if_available(current_user, title, body)
+    email_target = current_user.email or "deepakm7778@gmail.com"
+    email_ok = send_test_email(
+        recipient_email=email_target,
+        subject="RxCompute Test Email",
+        body="If you received this, custom SMTP is working.",
+    )
+    return {
+        "push_token_present": bool(current_user.push_token),
+        "email_target": email_target,
+        "email_sent": email_ok,
+        "note": "Check Render logs for push/email send errors if delivery fails.",
+    }

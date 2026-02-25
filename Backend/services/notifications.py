@@ -1,6 +1,7 @@
 import smtplib
 from email.mime.text import MIMEText
 
+import firebase_admin
 from firebase_admin import messaging
 from sqlalchemy.orm import Session
 
@@ -38,8 +39,12 @@ def create_notification(
 
 def send_push_if_available(user: User | None, title: str, body: str) -> None:
     if not user or not user.push_token:
+        print("Push skipped: no user or push token")
         return
     try:
+        if not firebase_admin._apps:
+            print("Push skipped: Firebase Admin is not initialized")
+            return
         msg = messaging.Message(
             token=user.push_token,
             notification=messaging.Notification(title=title, body=body),
@@ -54,6 +59,7 @@ def send_push_if_available(user: User | None, title: str, body: str) -> None:
         )
         messaging.send(msg)
     except Exception:
+        print("Push send failed")
         # Push failures should not break business flow.
         return
 
@@ -65,6 +71,7 @@ def send_order_email(user: User | None, order: Order) -> None:
         return
     recipient_email = user.email or SMTP_FALLBACK_TO_EMAIL
     if not recipient_email:
+        print("Email skipped: recipient missing")
         return
 
     items = "\n".join([f"- {it.name} x{it.quantity} ({it.price:.2f})" for it in order.items]) or "-"
@@ -93,5 +100,28 @@ def send_order_email(user: User | None, order: Order) -> None:
                 server.login(SMTP_USER, SMTP_PASSWORD)
                 server.send_message(msg)
     except Exception:
+        print("Email send failed")
         # Email failures should not block order flow.
         return
+
+
+def send_test_email(recipient_email: str, subject: str, body: str) -> bool:
+    if not SMTP_HOST or not SMTP_USER or not SMTP_PASSWORD:
+        return False
+    msg = MIMEText(body)
+    msg["Subject"] = subject
+    msg["From"] = SMTP_FROM_EMAIL or SMTP_USER
+    msg["To"] = recipient_email
+    try:
+        if SMTP_PORT == 465:
+            with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=12) as server:
+                server.login(SMTP_USER, SMTP_PASSWORD)
+                server.send_message(msg)
+        else:
+            with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=12) as server:
+                server.starttls()
+                server.login(SMTP_USER, SMTP_PASSWORD)
+                server.send_message(msg)
+        return True
+    except Exception:
+        return False

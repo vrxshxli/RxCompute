@@ -13,7 +13,7 @@ Use these keys in your local environment and Render environment.
 - `SMTP_HOST` = `smtp.gmail.com` (or your provider host)
 - `SMTP_PORT` = `587` (TLS) or `465` (SSL)
 - `SMTP_USER` = `deepakm7778@gmail.com`
-- `SMTP_PASSWORD` = your-gmail-app-password
+- `SMTP_PASSWORD` = your-gmail-app-password (spaces are automatically stripped)
 - `SMTP_FROM_EMAIL` = `deepakm7778@gmail.com`
 - `SMTP_FALLBACK_TO_EMAIL` = `deepakm7778@gmail.com` (used if user profile email is empty)
 
@@ -29,6 +29,13 @@ Use these keys in your local environment and Render environment.
 - Make sure cron service has:
   - `DATABASE_URL`
   - `FIREBASE_SERVICE_ACCOUNT`
+
+## Debug Endpoint
+
+- `POST /notifications/test-delivery`
+  - creates one in-app test notification
+  - tries push delivery to `push_token`
+  - tries email delivery to profile email (or fallback email)
 
 ## FIREBASE_SERVICE_ACCOUNT Format
 
