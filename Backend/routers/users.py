@@ -4,9 +4,10 @@ from sqlalchemy.orm import Session
 from database import get_db
 from dependencies import get_current_user
 from models.user import User
-from schemas.user import UserRegister, UserUpdate, UserOut
+from schemas.user import UserRegister, UserUpdate, UserOut, UserListItemOut
 
 router = APIRouter(prefix="/users", tags=["Users"])
+STAFF_ROLES = {"admin", "pharmacy_store", "warehouse"}
 
 
 @router.post("/register", response_model=UserOut)
@@ -49,3 +50,14 @@ def update_profile(
     db.commit()
     db.refresh(current_user)
     return current_user
+
+
+@router.get("/", response_model=list[UserListItemOut])
+def list_users(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """List users for staff dashboards."""
+    if current_user.role not in STAFF_ROLES:
+        raise HTTPException(status_code=403, detail="Access denied")
+    return db.query(User).order_by(User.created_at.desc()).limit(500).all()

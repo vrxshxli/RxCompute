@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import T from '../../utils/tokens';
 import { StatusPill, AgentBadge } from '../../components/shared';
 import {
@@ -6,17 +6,86 @@ import {
   ArrowUpRight, Shield, TrendingUp, Clock,
   CheckCircle, AlertTriangle, ExternalLink, Users
 } from 'lucide-react';
-import { ORDERS, MEDICINES, REFILL_ALERTS, AGENT_LOGS } from '../../data/mockData';
 import { useAuth } from '../../context/AuthContext';
 
 export default function AdminDashboard() {
-  const { user } = useAuth();
+  const { user, token, apiBase } = useAuth();
+  const [orders, setOrders] = useState([]);
+  const [medicines, setMedicines] = useState([]);
+  const [webhookLogs, setWebhookLogs] = useState([]);
+  const [users, setUsers] = useState([]);
+
+  useEffect(() => {
+    if (!token) return;
+    const headers = { Authorization: `Bearer ${token}` };
+    const load = async () => {
+      try {
+        const [ordersRes, medsRes, webhooksRes, usersRes] = await Promise.all([
+          fetch(`${apiBase}/orders/`, { headers }),
+          fetch(`${apiBase}/medicines/`, { headers }),
+          fetch(`${apiBase}/webhooks/logs`, { headers }),
+          fetch(`${apiBase}/users/`, { headers }),
+        ]);
+        if (ordersRes.ok) {
+          const data = await ordersRes.json();
+          setOrders(Array.isArray(data) ? data : []);
+        }
+        if (medsRes.ok) {
+          const data = await medsRes.json();
+          setMedicines(Array.isArray(data) ? data : []);
+        }
+        if (webhooksRes.ok) {
+          const data = await webhooksRes.json();
+          setWebhookLogs(Array.isArray(data) ? data : []);
+        }
+        if (usersRes.ok) {
+          const data = await usersRes.json();
+          setUsers(Array.isArray(data) ? data : []);
+        }
+      } catch (_) {}
+    };
+    load();
+  }, [token, apiBase]);
+
   const firstName = user?.name?.split(' ')[0] || 'Admin';
-  const pendingAlerts = REFILL_ALERTS.filter(a => a.status === 'pending').length;
-  const lowStock = MEDICINES.filter(m => m.stock <= 30).length;
-  const criticalStock = MEDICINES.filter(m => m.stock <= 10).length;
-  const healthyPct = Math.round((MEDICINES.filter(m => m.stock > 30).length / MEDICINES.length) * 100);
-  const blockedCount = AGENT_LOGS.filter(l => l.action.includes('BLOCKED')).length;
+  const userNameMap = useMemo(
+    () =>
+      users.reduce((acc, u) => {
+        acc[u.id] = (u.name || "").trim() || `User #${u.id}`;
+        return acc;
+      }, {}),
+    [users],
+  );
+  const mappedOrders = useMemo(
+    () =>
+      orders.map((o) => ({
+        order_id: o.order_uid,
+        patient_name: userNameMap[o.user_id] || `User #${o.user_id}`,
+        status: o.status,
+        total_price: o.total || 0,
+        pharmacy_node: o.pharmacy || '-',
+        items: o.items || [],
+        created_at: o.created_at,
+      })),
+    [orders, userNameMap],
+  );
+  const pendingAlerts = mappedOrders.filter((o) => o.status === 'pending').length;
+  const lowStock = medicines.filter((m) => (m.stock || 0) <= 30).length;
+  const criticalStock = medicines.filter((m) => (m.stock || 0) <= 10).length;
+  const healthyPct = medicines.length ? Math.round((medicines.filter((m) => (m.stock || 0) > 30).length / medicines.length) * 100) : 0;
+  const blockedCount = webhookLogs.filter((l) => (l.response_status || 0) >= 400).length;
+  const pendingActionCount = webhookLogs.filter((l) => !l.response_status).length;
+  const approvedCount = Math.max(webhookLogs.length - blockedCount - pendingActionCount, 0);
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const ordersToday = mappedOrders.filter((o) => (o.created_at || '').slice(0, 10) === todayStr).length;
+  const activePatients = new Set(mappedOrders.map((o) => o.patient_name)).size;
+  const agentActions = webhookLogs.length;
+  const liveActivity = webhookLogs.map((w) => ({
+    id: w.id,
+    agent_name: "order_agent",
+    action: `${w.event_type.replace(/_/g, ' ')} ${w.response_status && w.response_status >= 400 ? 'FAILED' : 'sent'} (${w.response_status || 'n/a'})`,
+    created_at: w.created_at,
+  }));
 
   /* palette — strictly blue + orange + white */
   const B = '#1A6BB5';   /* brand blue */
@@ -123,10 +192,10 @@ export default function AdminDashboard() {
             {/* Stat numbers row */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8, textAlign: 'center' }}>
               {[
-                { l: 'TOTAL', v: AGENT_LOGS.length },
-                { l: 'APPROVED', v: AGENT_LOGS.length - blockedCount - 4 },
+                { l: 'TOTAL', v: agentActions },
+                { l: 'APPROVED', v: approvedCount },
                 { l: 'BLOCKED', v: blockedCount },
-                { l: 'PENDING', v: 4 },
+                { l: 'PENDING', v: pendingActionCount },
               ].map(s => (
                 <div key={s.l} style={{ borderRight: s.l !== 'PENDING' ? '1px solid #e5e7eb' : 'none', padding: '4px 0' }}>
                   <div style={{ fontSize: 10, fontWeight: 700, color: '#9ca3af', letterSpacing: 0.5, marginBottom: 4 }}>{s.l}</div>
@@ -153,7 +222,7 @@ export default function AdminDashboard() {
             </div>
 
             {/* Order rows */}
-            {ORDERS.slice(0, 8).map((o, i) => (
+            {mappedOrders.slice(0, 8).map((o, i) => (
               <div key={o.order_id} style={{
                 display: 'grid', gridTemplateColumns: '28px 1.2fr 0.8fr 0.6fr 0.5fr 0.6fr',
                 gap: 8, padding: '14px 28px', alignItems: 'center',
@@ -175,7 +244,7 @@ export default function AdminDashboard() {
                   </div>
                 </div>
                 <span style={{ fontSize: 13, color: '#6b7280' }}>{o.items.length} item{o.items.length > 1 ? 's' : ''}</span>
-                <span style={{ fontSize: 14, fontWeight: 700, color: '#111827' }}>€{o.total_price.toFixed(0)}</span>
+                <span style={{ fontSize: 14, fontWeight: 700, color: '#111827' }}>₹{o.total_price.toFixed(0)}</span>
                 <span style={{ fontSize: 12, color: '#9ca3af', fontFamily: 'monospace' }}>{o.pharmacy_node}</span>
                 <StatusPill status={o.status} size="xs" />
               </div>
@@ -186,11 +255,11 @@ export default function AdminDashboard() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
             {/* 2x2 stat grid (like Possession, Overall Price, etc.) */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-              {[
-                { icon: ShoppingCart, label: 'ORDERS TODAY', value: '47', sub: '+12.3%', color: B, bg: `${B}08` },
-                { icon: TrendingUp, label: 'INVENTORY HEALTH', value: `${healthyPct}%`, sub: `${52 - lowStock}/52 stocked`, color: O, bg: `${O}06` },
-                { icon: Users, label: 'ACTIVE PATIENTS', value: '36', sub: 'All registered', color: B, bg: `${B}08` },
-                { icon: Zap, label: 'AGENT ACTIONS', value: String(AGENT_LOGS.length), sub: 'Last 24 hours', color: O, bg: `${O}06` },
+                {[
+                { icon: ShoppingCart, label: 'ORDERS TODAY', value: String(ordersToday), sub: `${mappedOrders.length} total`, color: B, bg: `${B}08` },
+                { icon: TrendingUp, label: 'INVENTORY HEALTH', value: `${healthyPct}%`, sub: `${medicines.length - lowStock}/${medicines.length} stocked`, color: O, bg: `${O}06` },
+                { icon: Users, label: 'ACTIVE PATIENTS', value: String(activePatients), sub: 'From orders', color: B, bg: `${B}08` },
+                { icon: Zap, label: 'AGENT ACTIONS', value: String(agentActions), sub: 'Webhook activity', color: O, bg: `${O}06` },
               ].map(s => (
                 <div key={s.label} className="glass" style={{ padding: 22, textAlign: 'center' }}>
                   <div style={{ width: 52, height: 52, borderRadius: '50%', background: s.bg, border: `2px solid ${s.color}20`, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px' }}>
@@ -243,7 +312,7 @@ export default function AdminDashboard() {
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 12, padding: '8px 28px 24px' }}>
-            {AGENT_LOGS.slice(0, 9).map(log => {
+            {liveActivity.slice(0, 9).map(log => {
               const isBlocked = log.action.includes('BLOCKED');
               const isCreated = log.action.includes('Created');
               const dotColor = isBlocked ? '#dc2626' : isCreated ? '#10b981' : B;

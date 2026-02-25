@@ -19,6 +19,15 @@ function deriveAvatar(name, fallback = "RX") {
   return parts.map((p) => p[0]?.toUpperCase() || "").join("") || fallback;
 }
 
+function fallbackNameForRole(role, providedName) {
+  if ((providedName || "").trim()) return providedName;
+  const normalized = normalizeRole(role);
+  if (normalized === "admin") return "Admin";
+  if (normalized === "pharmacy_store") return "Pharmacy";
+  if (normalized === "warehouse") return "Warehouse";
+  return "Rx User";
+}
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(null);
@@ -54,10 +63,21 @@ export function AuthProvider({ children }) {
       const userPayload = {
         id: data.user_id,
         email: data.email,
-        name: data.name || "Rx User",
+        name: fallbackNameForRole(data.role, data.name),
         role: normalizeRole(data.role),
-        avatar: deriveAvatar(data.name),
+        avatar: deriveAvatar(fallbackNameForRole(data.role, data.name)),
       };
+      try {
+        const meRes = await fetch(`${API_BASE}/users/me`, {
+          headers: { Authorization: `Bearer ${data.access_token}` },
+        });
+        if (meRes.ok) {
+          const me = await meRes.json();
+          const bestName = fallbackNameForRole(me.role || data.role, me.name);
+          userPayload.name = bestName;
+          userPayload.avatar = deriveAvatar(bestName);
+        }
+      } catch (_) {}
       localStorage.setItem(TOKEN_KEY, data.access_token);
       localStorage.setItem(USER_KEY, JSON.stringify(userPayload));
       setToken(data.access_token);

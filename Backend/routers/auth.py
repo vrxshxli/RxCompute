@@ -166,6 +166,10 @@ def web_login(req: WebLoginRequest, db: Session = Depends(get_db)):
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Role mismatch. This account belongs to '{user.role}'",
         )
+    if role == "admin" and not (user.name or "").strip():
+        user.name = "Admin"
+        db.commit()
+        db.refresh(user)
 
     token = create_access_token({"sub": str(user.id), "email": user.email, "role": user.role})
     return TokenResponse(

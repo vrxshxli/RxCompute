@@ -129,6 +129,7 @@ function DashboardShell() {
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: T.green }}><Wifi size={12} /> Systems OK</div>
           <div style={{ width: 1, height: 20, background: T.navy600 }} />
+          <div style={{ fontSize: 12, color: T.gray300, fontWeight: 600 }}>{user?.name || "User"}</div>
           <div style={{ width: 28, height: 28, borderRadius: "50%", background: T.navy700, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: T.white, fontWeight: 700 }}>{user?.avatar}</div>
         </div>
       </div>

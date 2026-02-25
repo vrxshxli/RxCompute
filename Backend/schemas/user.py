@@ -41,3 +41,13 @@ class UserOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class UserListItemOut(BaseModel):
+    id: int
+    name: str | None
+    email: str | None
+    role: str
+
+    class Config:
+        from_attributes = True
