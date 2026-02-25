@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Routes, Route, useNavigate, Navigate } from 'react-router-dom';
-import { LayoutGrid, Package, Bell, ShoppingCart, Shield, Search, Link2, Users, Map, Inbox, CheckCircle2, AlertTriangle, BarChart3, Grid3X3, Truck, Wifi, Menu } from 'lucide-react';
+import { LayoutGrid, Package, Bell, ShoppingCart, Shield, Search, Link2, Users, Map, Inbox, CheckCircle2, AlertTriangle, BarChart3, Grid3X3, Truck, Wifi, Menu, UserCircle2 } from 'lucide-react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Logo } from './components/shared';
 import Sidebar from './components/layout/Sidebar';
@@ -25,6 +25,7 @@ import PharmacyVerify from './pages/pharmacy/OrderVerify';
 import PharmacyInventory from './pages/pharmacy/PharmacyInventory';
 import PharmacyExceptions from './pages/pharmacy/Exceptions';
 import PharmacyAnalytics from './pages/pharmacy/Analytics';
+import PharmacyProfile from './pages/pharmacy/Profile';
 
 // Warehouse screens
 import WarehouseFulfillment from './pages/warehouse/Fulfillment';
@@ -52,6 +53,7 @@ const PHARMACY_NAV = [
   { key: "inventory", label: "Inventory", icon: Package },
   { key: "exceptions", label: "Exceptions", icon: AlertTriangle },
   { key: "analytics", label: "Analytics", icon: BarChart3 },
+  { key: "profile", label: "Profile", icon: UserCircle2 },
 ];
 
 const WAREHOUSE_NAV = [
@@ -114,6 +116,7 @@ function DashboardShell() {
         case "inventory": return <PharmacyInventory />;
         case "exceptions": return <PharmacyExceptions />;
         case "analytics": return <PharmacyAnalytics />;
+        case "profile": return <PharmacyProfile />;
         default: return <PharmacyOrderQueue />;
       }
     }

@@ -16,6 +16,9 @@ class UserUpdate(BaseModel):
     age: int | None = None
     gender: str | None = None
     email: str | None = None
+    location_text: str | None = None
+    location_lat: float | None = None
+    location_lng: float | None = None
     role: str | None = None
     push_token: str | None = None
     allergies: str | None = None
@@ -30,6 +33,9 @@ class UserOut(BaseModel):
     age: int | None
     gender: str | None
     email: str | None
+    location_text: str | None = None
+    location_lat: float | None = None
+    location_lng: float | None = None
     role: str
     push_token: str | None = None
     profile_picture: str | None = None

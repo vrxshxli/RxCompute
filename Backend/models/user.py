@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, Float
 from sqlalchemy.sql import func
 
 from database import Base
@@ -14,6 +14,9 @@ class User(Base):
     age = Column(Integer, nullable=True)
     gender = Column(String(10), nullable=True)
     email = Column(String(150), nullable=True)
+    location_text = Column(String(255), nullable=True)
+    location_lat = Column(Float, nullable=True)
+    location_lng = Column(Float, nullable=True)
     role = Column(String(40), nullable=False, default="user", server_default="user")
     password_hash = Column(Text, nullable=True)
     push_token = Column(String(255), nullable=True)

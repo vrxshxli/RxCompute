@@ -40,6 +40,9 @@ def migrate():
             ("google_id", "VARCHAR(255) UNIQUE"),
             ("profile_picture", "TEXT"),
             ("push_token", "VARCHAR(255)"),
+            ("location_text", "VARCHAR(255)"),
+            ("location_lat", "DOUBLE PRECISION"),
+            ("location_lng", "DOUBLE PRECISION"),
             ("role", "VARCHAR(40) DEFAULT 'user'"),
             ("password_hash", "TEXT"),
         ]
