@@ -4,6 +4,7 @@ import T from '../../utils/tokens';
 const STATUS_MAP = {
   delivered: { bg: `${T.green}18`, color: T.green, label: "Delivered" },
   confirmed: { bg: `${T.blue}18`, color: T.blue, label: "Confirmed" },
+  verified: { bg: `${T.green}18`, color: T.green, label: "Verified" },
   pending: { bg: `${T.yellow}18`, color: T.yellow, label: "Pending" },
   cancelled: { bg: `${T.red}18`, color: T.red, label: "Cancelled" },
   dispatched: { bg: `${T.green}18`, color: T.green, label: "Dispatched" },

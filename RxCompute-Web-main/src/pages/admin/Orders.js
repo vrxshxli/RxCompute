@@ -1,19 +1,103 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import T from '../../utils/tokens';
-import { StatusPill, StatCard, AgentBadge, StockDot, Toggle, SearchInput, Btn, PageHeader } from '../../components/shared';
-import { ORDERS } from '../../data/mockData';
+import { StatusPill, SearchInput, Btn, PageHeader } from '../../components/shared';
+import { useAuth } from '../../context/AuthContext';
 
 export default function AdminOrders() {
+  const { token, apiBase } = useAuth();
   const [search, setSearch] = useState("");
-  const filtered = search ? ORDERS.filter(o=>o.order_id.toLowerCase().includes(search.toLowerCase())||o.patient_name.toLowerCase().includes(search.toLowerCase())) : ORDERS;
+  const [orders, setOrders] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [savingId, setSavingId] = useState(null);
+  const [error, setError] = useState("");
+
+  const load = async () => {
+    if (!token) return;
+    const headers = { Authorization: `Bearer ${token}` };
+    try {
+      const [ordersRes, usersRes] = await Promise.all([
+        fetch(`${apiBase}/orders/`, { headers }),
+        fetch(`${apiBase}/users/`, { headers }),
+      ]);
+      if (ordersRes.ok) {
+        const data = await ordersRes.json();
+        setOrders(Array.isArray(data) ? data : []);
+      }
+      if (usersRes.ok) {
+        const data = await usersRes.json();
+        setUsers(Array.isArray(data) ? data : []);
+      }
+    } catch (_) {}
+  };
+
+  useEffect(() => {
+    load();
+  }, [token, apiBase]);
+
+  const userMap = useMemo(
+    () =>
+      users.reduce((acc, u) => {
+        acc[u.id] = (u.name || "").trim() || `User #${u.id}`;
+        return acc;
+      }, {}),
+    [users],
+  );
+  const viewRows = useMemo(
+    () =>
+      orders.map((o) => ({
+        id: o.id,
+        order_id: o.order_uid,
+        patient_name: userMap[o.user_id] || `User #${o.user_id}`,
+        status: o.status,
+        total_price: o.total || 0,
+        pharmacy_node: o.pharmacy || "-",
+        items: o.items || [],
+      })),
+    [orders, userMap],
+  );
+  const filtered = search
+    ? viewRows.filter(
+        (o) =>
+          o.order_id.toLowerCase().includes(search.toLowerCase()) ||
+          o.patient_name.toLowerCase().includes(search.toLowerCase()),
+      )
+    : viewRows;
   const groups = {};
   filtered.forEach(o => { if(!groups[o.status]) groups[o.status]=[]; groups[o.status].push(o); });
-  const statusOrder = ["pending","confirmed","pharmacy_verified","picking","packed","dispatched","delivered","cancelled"];
-  const statusColor = {pending:T.yellow,confirmed:T.blue,pharmacy_verified:T.green,picking:T.yellow,packed:T.blue,dispatched:T.green,delivered:T.green,cancelled:T.red};
+  const statusOrder = ["pending","confirmed","verified","picking","packed","dispatched","delivered","cancelled"];
+  const statusColor = {pending:T.yellow,confirmed:T.blue,verified:T.green,picking:T.yellow,packed:T.blue,dispatched:T.green,delivered:T.green,cancelled:T.red};
+  const statusOptions = ["pending","confirmed","verified","picking","packed","dispatched","delivered","cancelled"];
+
+  const updateStatus = async (orderId, status) => {
+    if (!token) return;
+    setSavingId(orderId);
+    setError("");
+    try {
+      const res = await fetch(`${apiBase}/orders/${orderId}/status`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ status }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data?.detail || "Failed to update status");
+      } else {
+        await load();
+      }
+    } catch (_) {
+      setError("Network error while updating status");
+    } finally {
+      setSavingId(null);
+    }
+  };
 
   return (<div>
-    <PageHeader title="All Orders" badge={String(ORDERS.length)}/>
+    <PageHeader title="All Orders" badge={String(viewRows.length)}/>
     <div style={{marginBottom:16}}><SearchInput value={search} onChange={setSearch} placeholder="Search orders..."/></div>
+    {error ? <div style={{marginBottom:10, color:T.red, fontSize:12}}>{error}</div> : null}
     <div style={{ display:"flex", gap:12, overflowX:"auto", paddingBottom:8 }}>
       {statusOrder.filter(s=>groups[s]).map(status => (
         <div key={status} style={{ minWidth:280, flexShrink:0 }}>
@@ -30,7 +114,20 @@ export default function AdminOrders() {
                 <div style={{ fontFamily:"monospace", fontSize:11, color:T.gray400, marginBottom:4 }}>{o.order_id}</div>
                 <div style={{ fontSize:13, fontWeight:600, color:T.gray900, marginBottom:4 }}>{o.patient_name}</div>
                 <div style={{ fontSize:12, color:T.gray500, marginBottom:6 }}>{o.items.length} items · {o.pharmacy_node}</div>
-                <div style={{ fontSize:15, fontWeight:700, color:T.blue }}>€{o.total_price.toFixed(2)}</div>
+                <div style={{ fontSize:15, fontWeight:700, color:T.blue, marginBottom:8 }}>₹{o.total_price.toFixed(2)}</div>
+                <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+                  <StatusPill status={o.status} size="xs" />
+                  <select
+                    value={o.status}
+                    onChange={(e) => updateStatus(o.id, e.target.value)}
+                    disabled={savingId === o.id}
+                    style={{ fontSize:11, padding:"4px 6px", border:`1px solid ${T.gray200}`, borderRadius:6 }}
+                  >
+                    {statusOptions.map((s) => (
+                      <option key={s} value={s}>{s.replace(/_/g," ")}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
             ))}
           </div>

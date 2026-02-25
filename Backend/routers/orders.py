@@ -147,23 +147,50 @@ def update_order_status(
     db: Session = Depends(get_db),
 ):
     """Update order status."""
-    query = db.query(Order).filter(Order.id == order_id)
     if current_user.role not in STAFF_ROLES:
-        query = query.filter(Order.user_id == current_user.id)
+        raise HTTPException(status_code=403, detail="Only staff can update order status")
+    query = db.query(Order).filter(Order.id == order_id)
     order = query.first()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    order.status = data.status
+    old_status = order.status.value if hasattr(order.status, "value") else str(order.status)
+    try:
+        new_status = OrderStatus(data.status)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid order status")
+
+    # On first approval (pending -> confirmed/verified), reserve stock from inventory.
+    if old_status == OrderStatus.pending.value and new_status in {OrderStatus.confirmed, OrderStatus.verified}:
+        med_ids = [it.medicine_id for it in order.items]
+        med_rows = db.query(Medicine).filter(Medicine.id.in_(med_ids)).all()
+        med_map = {m.id: m for m in med_rows}
+        for it in order.items:
+            med = med_map.get(it.medicine_id)
+            if not med:
+                raise HTTPException(status_code=400, detail=f"Medicine id {it.medicine_id} not found for stock update")
+            units_to_reduce = it.strips_count if (it.strips_count or 0) > 0 else max(it.quantity, 1)
+            if (med.stock or 0) < units_to_reduce:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Insufficient stock for {med.name}. Available {med.stock}, required {units_to_reduce}",
+                )
+        for it in order.items:
+            med = med_map[it.medicine_id]
+            units_to_reduce = it.strips_count if (it.strips_count or 0) > 0 else max(it.quantity, 1)
+            med.stock = (med.stock or 0) - units_to_reduce
+
+    order.status = new_status
     db.commit()
     db.refresh(order)
 
-    if data.status in {OrderStatus.confirmed.value, OrderStatus.dispatched.value, OrderStatus.delivered.value}:
+    if new_status.value in {OrderStatus.confirmed.value, OrderStatus.dispatched.value, OrderStatus.delivered.value, OrderStatus.verified.value}:
+        order_owner = db.query(User).filter(User.id == order.user_id).first() or current_user
         title = "Order Update"
-        body = f"{order.order_uid} status is now {data.status.upper()}"
-        create_notification(db, current_user.id, NotificationType.order, title, body, has_action=True)
+        body = f"{order.order_uid} status is now {new_status.value.upper()}"
+        create_notification(db, order.user_id, NotificationType.order, title, body, has_action=True)
         db.commit()
-        send_push_if_available(current_user, title, body)
-        send_order_email(current_user, order)
+        send_push_if_available(order_owner, title, body)
+        send_order_email(order_owner, order)
     dispatch_webhook(
         db,
         event_type="order_status_updated",

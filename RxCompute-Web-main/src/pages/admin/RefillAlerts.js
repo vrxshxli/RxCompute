@@ -1,20 +1,65 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import T from '../../utils/tokens';
-import { StatusPill, StatCard, AgentBadge, StockDot, Toggle, SearchInput, Btn, PageHeader } from '../../components/shared';
+import { StatusPill, StatCard, SearchInput, Btn, PageHeader } from '../../components/shared';
 import { XCircle, Clock, CheckCircle, RefreshCw, Send, FileText, AlertTriangle } from 'lucide-react';
-import { REFILL_ALERTS } from '../../data/mockData';
+import { useAuth } from '../../context/AuthContext';
 
 export default function AdminRefillAlerts() {
+  const { token, apiBase } = useAuth();
   const [search, setSearch] = useState("");
-  const overdue = REFILL_ALERTS.filter(a=>a.risk_level==="overdue").length;
-  const dueWeek = REFILL_ALERTS.filter(a=>a.days_remaining>=0&&a.days_remaining<=7).length;
-  const notified = REFILL_ALERTS.filter(a=>a.status==="notified").length;
-  const filtered = search ? REFILL_ALERTS.filter(a=>a.patient_id.toLowerCase().includes(search.toLowerCase())||a.medicine.toLowerCase().includes(search.toLowerCase())) : REFILL_ALERTS;
+  const [medicines, setMedicines] = useState([]);
+
+  const load = async () => {
+    if (!token) return;
+    try {
+      const res = await fetch(`${apiBase}/medicines/?limit=500`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      setMedicines(Array.isArray(data) ? data : []);
+    } catch (_) {}
+  };
+  useEffect(() => {
+    load();
+  }, [token, apiBase]);
+
+  const refillRows = useMemo(
+    () =>
+      medicines
+        .map((m) => {
+          const stock = m.stock || 0;
+          const target = 60;
+          const daysRemaining = Math.max(Math.floor(stock / 2), 0);
+          const risk =
+            stock <= 0 ? "overdue" : stock <= 10 ? "high" : stock <= 30 ? "medium" : "low";
+          const status = stock <= 30 ? "pending" : "notified";
+          return {
+            id: m.id,
+            patient_id: `MED-${m.id}`,
+            medicine: m.name,
+            dosage: m.rx_required ? "Rx medicine" : "OTC medicine",
+            last_purchase: "-",
+            days_remaining: daysRemaining,
+            risk_level: risk,
+            status,
+            stock,
+            target,
+            need_to_order: Math.max(target - stock, 0),
+          };
+        })
+        .filter((r) => r.stock <= 30),
+    [medicines],
+  );
+  const overdue = refillRows.filter(a=>a.risk_level==="overdue").length;
+  const dueWeek = refillRows.filter(a=>a.days_remaining>=0&&a.days_remaining<=7).length;
+  const notified = refillRows.filter(a=>a.status==="notified").length;
+  const filtered = search ? refillRows.filter(a=>a.patient_id.toLowerCase().includes(search.toLowerCase())||a.medicine.toLowerCase().includes(search.toLowerCase())) : refillRows;
 
   const riskColor = r => r==="overdue"?T.red:r==="high"?T.orange:r==="medium"?T.yellow:T.green;
 
   return (<div>
-    <PageHeader title="Proactive Refill Alerts" badge={String(REFILL_ALERTS.length)} actions={<Btn variant="primary" size="sm"><RefreshCw size={14}/>Run Predictions</Btn>} />
+    <PageHeader title="Proactive Refill Alerts" badge={String(refillRows.length)} actions={<Btn variant="primary" size="sm" onClick={load}><RefreshCw size={14}/>Refresh</Btn>} />
     <div style={{display:"flex",gap:16,marginBottom:24,flexWrap:"wrap"}}>
       <StatCard icon={XCircle} label="Overdue" value={String(overdue)} color={T.red}/>
       <StatCard icon={Clock} label="Due This Week" value={String(dueWeek)} color={T.yellow}/>
@@ -33,11 +78,11 @@ export default function AdminRefillAlerts() {
             <StatusPill status={a.risk_level} size="xs" />
           </div>
           <div style={{ fontSize:14, fontWeight:600, color:T.gray900, marginBottom:4 }}>{a.medicine.split(" ").slice(0,4).join(" ")}</div>
-          <div style={{ fontSize:12, color:T.gray500, marginBottom:8 }}>{a.dosage} · Last: {a.last_purchase}</div>
+          <div style={{ fontSize:12, color:T.gray500, marginBottom:8 }}>{a.dosage} · Need: {a.need_to_order} units</div>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
             <div>
               <span style={{ fontSize:22, fontWeight:800, color:riskColor(a.risk_level) }}>{a.days_remaining}d</span>
-              <span style={{ fontSize:11, color:T.gray400, marginLeft:4 }}>{a.days_remaining<0?"overdue":"remaining"}</span>
+              <span style={{ fontSize:11, color:T.gray400, marginLeft:4 }}>{a.days_remaining<0?"overdue":"remaining"} · stock {a.stock}</span>
             </div>
             <div style={{ display:"flex", alignItems:"center", gap:6 }}>
               <StatusPill status={a.status} size="xs" />
