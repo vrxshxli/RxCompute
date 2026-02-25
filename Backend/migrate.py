@@ -14,6 +14,7 @@ from models.order import Order, OrderItem  # noqa: F401
 from models.notification import Notification  # noqa: F401
 from models.user_medication import UserMedication  # noqa: F401
 from models.webhook_log import WebhookLog  # noqa: F401
+from models.pharmacy_store import PharmacyStore  # noqa: F401
 from services.security import hash_password
 
 
@@ -90,6 +91,7 @@ def migrate():
 
     print("  ✓ Migration complete")
     _ensure_default_web_accounts()
+    _ensure_default_pharmacy_stores()
 
 
 def _ensure_default_web_accounts():
@@ -125,6 +127,33 @@ def _ensure_default_web_accounts():
                     db.add(user)
         db.commit()
         print("  ✓ Default web role accounts verified")
+    finally:
+        db.close()
+
+
+def _ensure_default_pharmacy_stores():
+    defaults = [
+        ("PH-001", "Central Pharmacy", "Mumbai Central", True, 35, 48),
+        ("PH-002", "East Pharmacy", "Andheri East", True, 62, 44),
+        ("PH-003", "South Pharmacy", "Colaba", False, 0, 41),
+    ]
+    db = SessionLocal()
+    try:
+        for node_id, name, location, active, load, stock_count in defaults:
+            row = db.query(PharmacyStore).filter(PharmacyStore.node_id == node_id).first()
+            if not row:
+                db.add(
+                    PharmacyStore(
+                        node_id=node_id,
+                        name=name,
+                        location=location,
+                        active=active,
+                        load=load,
+                        stock_count=stock_count,
+                    )
+                )
+        db.commit()
+        print("  ✓ Default pharmacy stores verified")
     finally:
         db.close()
 

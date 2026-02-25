@@ -1,20 +1,129 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import T from '../../utils/tokens';
-import { StatusPill, StatCard, AgentBadge, StockDot, Toggle, SearchInput, Btn, PageHeader } from '../../components/shared';
-import { PHARMACY_NODES } from '../../data/mockData';
+import { Btn, PageHeader, StatCard } from '../../components/shared';
+import { Building2, MapPin } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
 export default function AdminPharmacyGrid() {
-  const rh=[{o:"ORD-043",n:"PH-002",r:"stock 100%, 2.3km, load 35%"},{o:"ORD-044",n:"PH-001",r:"stock 98%, 1.1km, load 42%"},{o:"ORD-045",n:"PH-002",r:"stock 100%, 2.3km, load 38%"},{o:"ORD-046",n:"PH-001",r:"stock 96%, load 48%"},{o:"ORD-047",n:"PH-002",r:"PH-003 offline, rerouted"}];
-  return (<div><PageHeader title="Virtual Pharmacy Grid" subtitle="Node health & routing"/>
-  <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:16,marginBottom:24}}>
-    {PHARMACY_NODES.map(n=><div key={n.node_id} style={{background:T.white,border:"1px solid "+T.gray200,borderRadius:12,padding:24}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}><span style={{fontFamily:"monospace",fontSize:14,fontWeight:600,color:T.gray900}}>{n.node_id}</span><div style={{display:"flex",alignItems:"center",gap:6}}><span style={{width:8,height:8,borderRadius:"50%",background:n.active?T.green:T.red}}/><span style={{fontSize:12,color:n.active?T.green:T.red,fontWeight:500}}>{n.active?"Active":"Offline"}</span></div></div>
-      <div style={{fontSize:14,fontWeight:500,color:T.gray900,marginBottom:4}}>{n.name}</div><div style={{fontSize:12,color:T.gray500,marginBottom:16}}>{n.location}</div>
-      <div style={{marginBottom:12}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{fontSize:11,color:T.gray500}}>Load</span><span style={{fontSize:11,fontWeight:600}}>{n.load}%</span></div><div style={{height:8,borderRadius:4,background:T.gray100,overflow:"hidden"}}><div style={{height:"100%",borderRadius:4,width:n.load+"%",background:n.load>80?T.red:n.load>50?T.yellow:T.green}}/></div></div>
-      <div style={{fontSize:12,color:T.gray500}}>{n.stock_count}/52 in stock</div>
-    </div>)}
+  const { token, apiBase } = useAuth();
+  const [stores, setStores] = useState([]);
+  const [savingId, setSavingId] = useState(null);
+  const [error, setError] = useState("");
+  const [newStore, setNewStore] = useState({
+    node_id: "",
+    name: "",
+    location: "",
+    load: "0",
+    stock_count: "0",
+    active: true,
+  });
+
+  const loadStores = async () => {
+    if (!token) return;
+    try {
+      const res = await fetch(`${apiBase}/pharmacy-stores/`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      setStores(Array.isArray(data) ? data : []);
+    } catch (_) {}
+  };
+  useEffect(() => {
+    loadStores();
+  }, [token, apiBase]);
+
+  const uniqueLocations = useMemo(
+    () => new Set(stores.map((s) => (s.location || "").trim().toLowerCase()).filter(Boolean)).size,
+    [stores],
+  );
+
+  const saveStore = async (store) => {
+    if (!token) return;
+    setSavingId(store.id);
+    setError("");
+    try {
+      const res = await fetch(`${apiBase}/pharmacy-stores/${store.id}`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: store.name,
+          location: store.location,
+          active: !!store.active,
+          load: Number(store.load || 0),
+          stock_count: Number(store.stock_count || 0),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) setError(data?.detail || "Save failed");
+      await loadStores();
+    } catch (_) {
+      setError("Network error while saving store");
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const createStore = async () => {
+    if (!token) return;
+    setError("");
+    try {
+      const res = await fetch(`${apiBase}/pharmacy-stores/`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          node_id: newStore.node_id.trim(),
+          name: newStore.name.trim(),
+          location: newStore.location.trim(),
+          active: !!newStore.active,
+          load: Number(newStore.load || 0),
+          stock_count: Number(newStore.stock_count || 0),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data?.detail || "Create failed");
+        return;
+      }
+      setNewStore({ node_id: "", name: "", location: "", load: "0", stock_count: "0", active: true });
+      await loadStores();
+    } catch (_) {
+      setError("Network error while creating store");
+    }
+  };
+
+  return (<div><PageHeader title="Virtual Pharmacy Grid" subtitle="Node health & routing with saved locations"/>
+  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(180px, 1fr))",gap:12,marginBottom:16}}>
+    <StatCard icon={Building2} label="Pharmacy Stores" value={String(stores.length)} color={T.blue}/>
+    <StatCard icon={MapPin} label="Locations" value={String(uniqueLocations)} color={T.orange}/>
   </div>
-  <div style={{background:T.white,border:"1px solid "+T.gray200,borderRadius:12,padding:20}}>
-    <div style={{fontWeight:600,fontSize:14,color:T.gray900,marginBottom:16}}>Routing History</div>
-    {rh.map((x,i)=><div key={i} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 0",borderBottom:i<rh.length-1?"1px solid "+T.gray100:"none"}}><span style={{fontFamily:"monospace",fontSize:12,color:T.orange,fontWeight:600}}>{x.o}</span><span style={{color:T.gray400}}>→</span><span style={{fontFamily:"monospace",fontSize:12,color:T.blue,fontWeight:600}}>{x.n}</span><span style={{fontSize:12,color:T.gray500}}>{x.r}</span></div>)}
+  <div style={{background:T.white,border:"1px solid "+T.gray200,borderRadius:12,padding:14,marginBottom:16}}>
+    <div style={{fontSize:13,fontWeight:600,color:T.gray900,marginBottom:10}}>Add Pharmacy Store</div>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(6, minmax(110px,1fr))",gap:8}}>
+      <input value={newStore.node_id} onChange={(e)=>setNewStore({...newStore, node_id:e.target.value})} placeholder="Node ID" style={{padding:"8px",border:`1px solid ${T.gray200}`,borderRadius:8}} />
+      <input value={newStore.name} onChange={(e)=>setNewStore({...newStore, name:e.target.value})} placeholder="Store name" style={{padding:"8px",border:`1px solid ${T.gray200}`,borderRadius:8}} />
+      <input value={newStore.location} onChange={(e)=>setNewStore({...newStore, location:e.target.value})} placeholder="Location" style={{padding:"8px",border:`1px solid ${T.gray200}`,borderRadius:8}} />
+      <input type="number" value={newStore.load} onChange={(e)=>setNewStore({...newStore, load:e.target.value})} placeholder="Load %" style={{padding:"8px",border:`1px solid ${T.gray200}`,borderRadius:8}} />
+      <input type="number" value={newStore.stock_count} onChange={(e)=>setNewStore({...newStore, stock_count:e.target.value})} placeholder="Stock count" style={{padding:"8px",border:`1px solid ${T.gray200}`,borderRadius:8}} />
+      <Btn variant="primary" size="sm" onClick={createStore}>Save</Btn>
+    </div>
+    {error ? <div style={{marginTop:8,fontSize:12,color:T.red}}>{error}</div> : null}
+  </div>
+  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:16,marginBottom:24}}>
+    {stores.map((n, idx)=><div key={n.id} style={{background:T.white,border:"1px solid "+T.gray200,borderRadius:12,padding:24}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}><span style={{fontFamily:"monospace",fontSize:14,fontWeight:600,color:T.gray900}}>{n.node_id}</span><div style={{display:"flex",alignItems:"center",gap:6}}><span style={{width:8,height:8,borderRadius:"50%",background:n.active?T.green:T.red}}/><span style={{fontSize:12,color:n.active?T.green:T.red,fontWeight:500}}>{n.active?"Active":"Offline"}</span></div></div>
+      <input value={n.name} onChange={(e)=>setStores(stores.map((s,i)=> i===idx ? {...s, name:e.target.value} : s))} style={{width:"100%",marginBottom:8,padding:"8px",border:`1px solid ${T.gray200}`,borderRadius:8,fontSize:13}} />
+      <input value={n.location} onChange={(e)=>setStores(stores.map((s,i)=> i===idx ? {...s, location:e.target.value} : s))} style={{width:"100%",marginBottom:12,padding:"8px",border:`1px solid ${T.gray200}`,borderRadius:8,fontSize:12,color:T.gray600}} />
+      <div style={{marginBottom:12}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{fontSize:11,color:T.gray500}}>Load</span><span style={{fontSize:11,fontWeight:600}}>{n.load}%</span></div><div style={{height:8,borderRadius:4,background:T.gray100,overflow:"hidden"}}><div style={{height:"100%",borderRadius:4,width:n.load+"%",background:n.load>80?T.red:n.load>50?T.yellow:T.green}}/></div></div>
+      <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"center"}}>
+        <div style={{fontSize:12,color:T.gray500}}>{n.stock_count} in stock</div>
+        <Btn variant="secondary" size="sm" onClick={() => saveStore(n)} disabled={savingId===n.id}>{savingId===n.id ? "Saving..." : "Save"}</Btn>
+      </div>
+    </div>)}
   </div></div>);
 }

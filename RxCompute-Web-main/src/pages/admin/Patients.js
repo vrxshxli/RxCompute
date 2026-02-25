@@ -1,11 +1,44 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import T from '../../utils/tokens';
-import { StatusPill, StatCard, AgentBadge, StockDot, Toggle, SearchInput, Btn, PageHeader } from '../../components/shared';
-import { PATIENTS } from '../../data/mockData';
+import { SearchInput, PageHeader } from '../../components/shared';
+import { useAuth } from '../../context/AuthContext';
 export default function AdminPatients() {
+  const { token, apiBase } = useAuth();
   const [search, setSearch] = useState("");
-  const filtered = search?PATIENTS.filter(p=>p.name.toLowerCase().includes(search.toLowerCase())||p.pid.toLowerCase().includes(search.toLowerCase())):PATIENTS;
-  return (<div><PageHeader title="Patients" badge={String(PATIENTS.length)}/>
+  const [patients, setPatients] = useState([]);
+
+  useEffect(() => {
+    if (!token) return;
+    const load = async () => {
+      try {
+        const res = await fetch(`${apiBase}/users/?role=user`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        const mapped = (Array.isArray(data) ? data : []).map((u) => ({
+          pid: `PAT-${u.id}`,
+          name: (u.name || "").trim() || `User #${u.id}`,
+          email: u.email || "-",
+        }));
+        setPatients(mapped);
+      } catch (_) {}
+    };
+    load();
+  }, [token, apiBase]);
+
+  const filtered = useMemo(
+    () =>
+      search
+        ? patients.filter(
+            (p) =>
+              p.name.toLowerCase().includes(search.toLowerCase()) ||
+              p.pid.toLowerCase().includes(search.toLowerCase()),
+          )
+        : patients,
+    [patients, search],
+  );
+  return (<div><PageHeader title="Patients" badge={String(patients.length)}/>
   <div style={{marginBottom:16}}><SearchInput value={search} onChange={setSearch} placeholder="Search patients..."/></div>
   {/* Grid of patient cards */}
   <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(220px, 1fr))", gap:12 }}>
@@ -17,9 +50,7 @@ export default function AdminPatients() {
           <div style={{ width:36, height:36, borderRadius:"50%", background:T.blue+"15", display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, fontWeight:700, color:T.blue }}>{p.name.split(" ").map(n=>n[0]).join("")}</div>
           <div><div style={{ fontSize:14, fontWeight:600, color:T.gray900 }}>{p.name}</div><div style={{ fontFamily:"monospace", fontSize:11, color:T.gray400 }}>{p.pid}</div></div>
         </div>
-        <div style={{ display:"flex", gap:16, fontSize:12, color:T.gray500 }}>
-          <span>Age: {p.age}</span><span>{p.gender==="M"?"Male":"Female"}</span>
-        </div>
+        <div style={{ fontSize:12, color:T.gray500 }}>{p.email}</div>
       </div>
     ))}
   </div></div>);

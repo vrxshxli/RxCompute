@@ -98,15 +98,15 @@ export default function AdminOrders() {
     <PageHeader title="All Orders" badge={String(viewRows.length)}/>
     <div style={{marginBottom:16}}><SearchInput value={search} onChange={setSearch} placeholder="Search orders..."/></div>
     {error ? <div style={{marginBottom:10, color:T.red, fontSize:12}}>{error}</div> : null}
-    <div style={{ display:"flex", gap:12, overflowX:"auto", paddingBottom:8 }}>
+    <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
       {statusOrder.filter(s=>groups[s]).map(status => (
-        <div key={status} style={{ minWidth:280, flexShrink:0 }}>
+        <div key={status}>
           <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:12, padding:"8px 12px", background:T.white, borderRadius:8, border:"1px solid "+T.gray200 }}>
             <span style={{ width:10, height:10, borderRadius:"50%", background:statusColor[status]||T.gray400 }} />
             <span style={{ fontSize:13, fontWeight:600, color:T.gray900, textTransform:"capitalize" }}>{status.replace(/_/g," ")}</span>
             <span style={{ fontSize:11, color:T.gray400, marginLeft:"auto" }}>{groups[status].length}</span>
           </div>
-          <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(280px, 1fr))", gap:10 }}>
             {groups[status].map(o => (
               <div key={o.order_id} style={{ background:T.white, border:"1px solid "+T.gray200, borderRadius:8, padding:14, transition:"box-shadow .2s" }}
                 onMouseEnter={e=>e.currentTarget.style.boxShadow="0 2px 12px rgba(0,0,0,.06)"}

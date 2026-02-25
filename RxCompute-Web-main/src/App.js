@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Routes, Route, useNavigate, Navigate } from 'react-router-dom';
-import { LayoutGrid, Package, Bell, ShoppingCart, Shield, Search, Link2, Users, Map, Inbox, CheckCircle2, AlertTriangle, BarChart3, Grid3X3, Truck, Wifi } from 'lucide-react';
+import { LayoutGrid, Package, Bell, ShoppingCart, Shield, Search, Link2, Users, Map, Inbox, CheckCircle2, AlertTriangle, BarChart3, Grid3X3, Truck, Wifi, Menu } from 'lucide-react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Logo } from './components/shared';
 import Sidebar from './components/layout/Sidebar';
@@ -70,13 +70,27 @@ function DashboardShell() {
   const isPharmacy = role === "pharmacy_store" || role === "pharmacy";
   const defaultPage = isAdmin ? "dashboard" : isPharmacy ? "order-queue" : "fulfillment";
   const [page, setPage] = useState(defaultPage);
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(window.innerWidth < 992);
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 992);
 
   useEffect(() => {
     setPage(isAdmin ? "dashboard" : isPharmacy ? "order-queue" : "fulfillment");
   }, [isAdmin, isPharmacy]);
+  useEffect(() => {
+    const onResize = () => {
+      const mobile = window.innerWidth < 992;
+      setIsMobile(mobile);
+      setCollapsed(mobile);
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   const nav = isAdmin ? ADMIN_NAV : isPharmacy ? PHARMACY_NAV : WAREHOUSE_NAV;
+  const handleSelectPage = (nextPage) => {
+    setPage(nextPage);
+    if (isMobile) setCollapsed(true);
+  };
 
   const renderPage = () => {
     if (isAdmin) {
@@ -121,6 +135,12 @@ function DashboardShell() {
       {/* Top bar */}
       <div style={{ position: "sticky", top: 0, zIndex: 50, background: T.navy900, height: 44, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 24px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <button
+            onClick={() => setCollapsed((v) => !v)}
+            style={{ background: "transparent", border: "none", color: T.white, display: "flex", alignItems: "center", cursor: "pointer" }}
+          >
+            <Menu size={18} />
+          </button>
           <Logo size="sm" dark />
           <span style={{ background: `${roleColor}20`, color: roleColor, padding: "3px 12px", borderRadius: 6, fontSize: 11, fontWeight: 700, textTransform: "uppercase" }}>
             {isAdmin ? "Admin" : isPharmacy ? "Pharmacy" : "Warehouse"}
@@ -135,7 +155,13 @@ function DashboardShell() {
       </div>
       {/* Body */}
       <div style={{ display: "flex" }}>
-        <Sidebar items={nav} active={page} onSelect={setPage} role={role} collapsed={collapsed} onToggle={() => setCollapsed(!collapsed)} />
+        <Sidebar items={nav} active={page} onSelect={handleSelectPage} role={role} collapsed={collapsed} onToggle={() => setCollapsed(!collapsed)} isMobile={isMobile} />
+        {isMobile && !collapsed ? (
+          <div
+            onClick={() => setCollapsed(true)}
+            style={{ position: "fixed", top: 44, left: 0, right: 0, bottom: 0, background: "rgba(15,23,42,.35)", zIndex: 60 }}
+          />
+        ) : null}
         <main style={{ flex: 1, padding: 24, minHeight: "calc(100vh - 44px)", overflow: "auto" }}>
           {renderPage()}
         </main>
