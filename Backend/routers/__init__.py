@@ -6,6 +6,7 @@ from routers.notifications import router as notifications_router
 from routers.user_medications import router as user_medications_router
 from routers.home import router as home_router
 from routers.chat import router as chat_router
+from routers.jobs import router as jobs_router
 
 __all__ = [
     "auth_router",
@@ -16,4 +17,5 @@ __all__ = [
     "user_medications_router",
     "home_router",
     "chat_router",
+    "jobs_router",
 ]

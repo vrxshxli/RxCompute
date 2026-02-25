@@ -40,6 +40,8 @@ services:
         value: "deepakm7778@gmail.com"
       - key: SMTP_FALLBACK_TO_EMAIL
         value: "deepakm7778@gmail.com"
+      - key: JOB_RUN_KEY
+        sync: false  # Secret key used by external scheduler endpoint
   - type: cron
     name: rxcompute-daily-refill-reminder
     runtime: python

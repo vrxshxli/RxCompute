@@ -24,3 +24,6 @@ SMTP_USER = os.getenv("SMTP_USER", "deepakm7778@gmail.com")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "nyur amcv pgmu dvau").replace(" ", "")
 SMTP_FROM_EMAIL = os.getenv("SMTP_FROM_EMAIL", "deepakm7778@gmail.com")
 SMTP_FALLBACK_TO_EMAIL = os.getenv("SMTP_FALLBACK_TO_EMAIL", "deepakm7778@gmail.com")
+
+# Secret for external scheduler endpoint (e.g., cron-job.org)
+JOB_RUN_KEY = os.getenv("JOB_RUN_KEY", "")

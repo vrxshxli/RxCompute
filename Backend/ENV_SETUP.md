@@ -20,6 +20,7 @@ Use these keys in your local environment and Render environment.
 ## Optional
 
 - `FIREBASE_PROJECT_ID`
+- `JOB_RUN_KEY` (required only if using external free scheduler without Render cron)
 
 ## Daily Refill Reminder (Render Cron)
 
@@ -29,6 +30,15 @@ Use these keys in your local environment and Render environment.
 - Make sure cron service has:
   - `DATABASE_URL`
   - `FIREBASE_SERVICE_ACCOUNT`
+
+## Daily Refill Reminder (No Card / External Scheduler)
+
+- If you cannot use Render Cron (card required), use free `cron-job.org`.
+- Set `JOB_RUN_KEY` in Render web service env (random long secret).
+- Configure cron-job.org to call daily:
+  - `GET https://rxcompute-api.onrender.com/jobs/run-refill-reminders?key=YOUR_JOB_RUN_KEY`
+- Suggested schedule for 09:00 IST:
+  - `03:30 UTC` daily in cron-job.org
 
 ## Debug Endpoint
 
