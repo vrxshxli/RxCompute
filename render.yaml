@@ -42,6 +42,12 @@ services:
         value: "deepakm7778@gmail.com"
       - key: JOB_RUN_KEY
         sync: false  # Secret key used by external scheduler endpoint
+      - key: WEBHOOK_TARGET_URL
+        sync: false  # External webhook receiver URL
+      - key: WEBHOOK_SECRET
+        sync: false  # Optional HMAC secret for outgoing webhooks
+      - key: WEBHOOK_TIMEOUT_SECONDS
+        value: "8"
   - type: cron
     name: rxcompute-daily-refill-reminder
     runtime: python

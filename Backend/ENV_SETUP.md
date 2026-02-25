@@ -21,6 +21,27 @@ Use these keys in your local environment and Render environment.
 
 - `FIREBASE_PROJECT_ID`
 - `JOB_RUN_KEY` (required only if using external free scheduler without Render cron)
+- `WEBHOOK_TARGET_URL` (where order webhooks should be sent)
+- `WEBHOOK_SECRET` (optional signature secret, sent as `X-Rx-Signature`)
+- `WEBHOOK_TIMEOUT_SECONDS` (default `8`)
+
+## Role-Based Web Login
+
+- Backend now supports roles in `users.role`:
+  - `user`
+  - `admin`
+  - `pharmacy_store`
+  - `warehouse`
+- Web login endpoint:
+  - `POST /auth/web-login`
+- Default seeded staff credentials (created by migration if missing):
+  - `admin@rxcompute.com` / `admin123`
+  - `pharmacy@rxcompute.com` / `pharma123`
+  - `warehouse@rxcompute.com` / `warehouse123`
+- Web app routes:
+  - `/login/admin`
+  - `/login/pharmacy`
+  - `/login/warehouse`
 
 ## Daily Refill Reminder (Render Cron)
 
@@ -46,6 +67,16 @@ Use these keys in your local environment and Render environment.
   - creates one in-app test notification
   - tries push delivery to `push_token`
   - tries email delivery to profile email (or fallback email)
+- `GET /notifications/test-delivery` (browser-friendly alias)
+
+## Webhook Endpoints
+
+- Outgoing order webhooks are sent on:
+  - order creation
+  - order status update
+- Admin/staff APIs:
+  - `GET /webhooks/logs`
+  - `POST /webhooks/test`
 
 ## FIREBASE_SERVICE_ACCOUNT Format
 

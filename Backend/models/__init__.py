@@ -3,5 +3,6 @@ from models.medicine import Medicine
 from models.order import Order, OrderItem
 from models.notification import Notification
 from models.user_medication import UserMedication
+from models.webhook_log import WebhookLog
 
-__all__ = ["User", "OTP", "Medicine", "Order", "OrderItem", "Notification", "UserMedication"]
+__all__ = ["User", "OTP", "Medicine", "Order", "OrderItem", "Notification", "UserMedication", "WebhookLog"]

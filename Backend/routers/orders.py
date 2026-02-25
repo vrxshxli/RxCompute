@@ -12,8 +12,10 @@ from models.medicine import Medicine
 from models.notification import NotificationType
 from schemas.order import OrderCreate, OrderOut, OrderStatusUpdate
 from services.notifications import create_notification, send_order_email, send_push_if_available
+from services.webhooks import dispatch_webhook
 
 router = APIRouter(prefix="/orders", tags=["Orders"])
+STAFF_ROLES = {"admin", "pharmacy_store", "warehouse"}
 
 
 def _generate_order_uid() -> str:
@@ -28,6 +30,8 @@ def list_orders(
     db: Session = Depends(get_db),
 ):
     """List all orders for the current user."""
+    if current_user.role in STAFF_ROLES:
+        return db.query(Order).order_by(Order.created_at.desc()).all()
     return (
         db.query(Order)
         .filter(Order.user_id == current_user.id)
@@ -43,11 +47,10 @@ def get_order(
     db: Session = Depends(get_db),
 ):
     """Get a specific order by ID."""
-    order = (
-        db.query(Order)
-        .filter(Order.id == order_id, Order.user_id == current_user.id)
-        .first()
-    )
+    query = db.query(Order).filter(Order.id == order_id)
+    if current_user.role not in STAFF_ROLES:
+        query = query.filter(Order.user_id == current_user.id)
+    order = query.first()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
     return order
@@ -121,6 +124,18 @@ def create_order(
     db.commit()
     send_push_if_available(current_user, title, body)
     send_order_email(current_user, order)
+    dispatch_webhook(
+        db,
+        event_type="order_created",
+        payload={
+            "order_id": order.id,
+            "order_uid": order.order_uid,
+            "user_id": order.user_id,
+            "status": order.status.value,
+            "total": order.total,
+            "payment_method": order.payment_method,
+        },
+    )
     return order
 
 
@@ -132,11 +147,10 @@ def update_order_status(
     db: Session = Depends(get_db),
 ):
     """Update order status."""
-    order = (
-        db.query(Order)
-        .filter(Order.id == order_id, Order.user_id == current_user.id)
-        .first()
-    )
+    query = db.query(Order).filter(Order.id == order_id)
+    if current_user.role not in STAFF_ROLES:
+        query = query.filter(Order.user_id == current_user.id)
+    order = query.first()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
     order.status = data.status
@@ -150,4 +164,16 @@ def update_order_status(
         db.commit()
         send_push_if_available(current_user, title, body)
         send_order_email(current_user, order)
+    dispatch_webhook(
+        db,
+        event_type="order_status_updated",
+        payload={
+            "order_id": order.id,
+            "order_uid": order.order_uid,
+            "user_id": order.user_id,
+            "status": order.status.value,
+            "updated_by": current_user.id,
+            "updated_by_role": current_user.role,
+        },
+    )
     return order

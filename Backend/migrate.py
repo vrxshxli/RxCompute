@@ -5,6 +5,7 @@ Safe to run multiple times (checks before altering).
 
 from sqlalchemy import text, inspect
 from database import engine, Base
+from database import SessionLocal
 
 # Import all models so Base.metadata knows about them
 from models.user import User, OTP  # noqa: F401
@@ -12,6 +13,8 @@ from models.medicine import Medicine  # noqa: F401
 from models.order import Order, OrderItem  # noqa: F401
 from models.notification import Notification  # noqa: F401
 from models.user_medication import UserMedication  # noqa: F401
+from models.webhook_log import WebhookLog  # noqa: F401
+from services.security import hash_password
 
 
 def get_existing_columns(conn, table_name: str) -> set:
@@ -36,6 +39,8 @@ def migrate():
             ("google_id", "VARCHAR(255) UNIQUE"),
             ("profile_picture", "TEXT"),
             ("push_token", "VARCHAR(255)"),
+            ("role", "VARCHAR(40) DEFAULT 'user'"),
+            ("password_hash", "TEXT"),
         ]
 
         for col_name, col_type in migrations:
@@ -54,6 +59,9 @@ def migrate():
         ))
         conn.commit()
         print("  ✓ users.phone is now nullable")
+        conn.execute(text("UPDATE users SET role = 'user' WHERE role IS NULL"))
+        conn.commit()
+        print("  ✓ users.role backfilled to 'user'")
 
         # 4. Add missing columns to 'order_items' table
         order_item_cols = get_existing_columns(conn, "order_items")
@@ -81,6 +89,44 @@ def migrate():
             print("  · Column already exists: medicines.image_url")
 
     print("  ✓ Migration complete")
+    _ensure_default_web_accounts()
+
+
+def _ensure_default_web_accounts():
+    defaults = [
+        ("admin@rxcompute.com", "Arjun Verma", "admin", "admin123"),
+        ("pharmacy@rxcompute.com", "Dr. Priya Patel", "pharmacy_store", "pharma123"),
+        ("warehouse@rxcompute.com", "Rahul Menon", "warehouse", "warehouse123"),
+    ]
+    db = SessionLocal()
+    try:
+        for email, name, role, password in defaults:
+            user = db.query(User).filter(User.email == email).first()
+            if not user:
+                db.add(
+                    User(
+                        email=email,
+                        name=name,
+                        role=role,
+                        password_hash=hash_password(password),
+                        is_verified=True,
+                        is_registered=True,
+                    )
+                )
+            else:
+                changed = False
+                if not user.role or user.role == "user":
+                    user.role = role
+                    changed = True
+                if not user.password_hash:
+                    user.password_hash = hash_password(password)
+                    changed = True
+                if changed:
+                    db.add(user)
+        db.commit()
+        print("  ✓ Default web role accounts verified")
+    finally:
+        db.close()
 
 
 if __name__ == "__main__":

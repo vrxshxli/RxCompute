@@ -42,6 +42,8 @@ def update_profile(
 ):
     """Update current user profile fields."""
     update_data = data.model_dump(exclude_unset=True)
+    if "role" in update_data and current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Only admin can change user role")
     for key, value in update_data.items():
         setattr(current_user, key, value)
     db.commit()

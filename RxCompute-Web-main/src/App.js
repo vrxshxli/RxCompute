@@ -1,0 +1,184 @@
+import React, { useState, useEffect } from 'react';
+import { Routes, Route, useNavigate, Navigate } from 'react-router-dom';
+import { LayoutGrid, Package, Bell, ShoppingCart, Shield, Search, Link2, Users, Map, Inbox, CheckCircle2, AlertTriangle, BarChart3, Grid3X3, Truck, Wifi } from 'lucide-react';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import { Logo } from './components/shared';
+import Sidebar from './components/layout/Sidebar';
+import LandingPage from './pages/landing/LandingPage';
+import LoginPage from './pages/auth/LoginPage';
+import T from './utils/tokens';
+
+// Admin screens
+import AdminDashboard from './pages/admin/Dashboard';
+import AdminInventory from './pages/admin/Inventory';
+import AdminRefillAlerts from './pages/admin/RefillAlerts';
+import AdminOrders from './pages/admin/Orders';
+import AdminSafetyRules from './pages/admin/SafetyRules';
+import AdminAgentTraces from './pages/admin/AgentTraces';
+import AdminWebhookLogs from './pages/admin/WebhookLogs';
+import AdminPatients from './pages/admin/Patients';
+import AdminPharmacyGrid from './pages/admin/PharmacyGrid';
+
+// Pharmacy screens
+import PharmacyOrderQueue from './pages/pharmacy/OrderQueue';
+import PharmacyVerify from './pages/pharmacy/OrderVerify';
+import PharmacyInventory from './pages/pharmacy/PharmacyInventory';
+import PharmacyExceptions from './pages/pharmacy/Exceptions';
+import PharmacyAnalytics from './pages/pharmacy/Analytics';
+
+// Warehouse screens
+import WarehouseFulfillment from './pages/warehouse/Fulfillment';
+import WarehousePickPack from './pages/warehouse/PickPack';
+import WarehouseShelfHeatmap from './pages/warehouse/ShelfHeatmap';
+import WarehouseDispatch from './pages/warehouse/Dispatch';
+import WarehouseRecall from './pages/warehouse/RecallMode';
+
+/* ═══════ NAV CONFIGS ═══════ */
+const ADMIN_NAV = [
+  { key: "dashboard", label: "Dashboard", icon: LayoutGrid },
+  { key: "inventory", label: "Inventory", icon: Package },
+  { key: "refill-alerts", label: "Refill Alerts", icon: Bell },
+  { key: "orders", label: "Orders", icon: ShoppingCart },
+  { key: "safety-rules", label: "Safety Rules", icon: Shield },
+  { key: "agent-traces", label: "Agent Traces", icon: Search },
+  { key: "webhook-logs", label: "Webhook Logs", icon: Link2 },
+  { key: "patients", label: "Patients", icon: Users },
+  { key: "pharmacy-grid", label: "Pharmacy Grid", icon: Map },
+];
+
+const PHARMACY_NAV = [
+  { key: "order-queue", label: "Order Queue", icon: Inbox },
+  { key: "verify-orders", label: "Verify Orders", icon: CheckCircle2 },
+  { key: "inventory", label: "Inventory", icon: Package },
+  { key: "exceptions", label: "Exceptions", icon: AlertTriangle },
+  { key: "analytics", label: "Analytics", icon: BarChart3 },
+];
+
+const WAREHOUSE_NAV = [
+  { key: "fulfillment", label: "Fulfillment Queue", icon: Inbox },
+  { key: "pick-pack", label: "Pick & Pack", icon: Package },
+  { key: "shelf-heatmap", label: "Shelf Heatmap", icon: Grid3X3 },
+  { key: "dispatch", label: "Dispatch", icon: Truck },
+  { key: "recalls", label: "Recall Mode", icon: AlertTriangle },
+];
+
+/* ═══════ DASHBOARD SHELL (sidebar + topbar + content) ═══════ */
+function DashboardShell() {
+  const { user } = useAuth();
+  const role = user?.role || "admin";
+  const isAdmin = role === "admin" || role === "user";
+  const isPharmacy = role === "pharmacy_store" || role === "pharmacy";
+  const defaultPage = isAdmin ? "dashboard" : isPharmacy ? "order-queue" : "fulfillment";
+  const [page, setPage] = useState(defaultPage);
+  const [collapsed, setCollapsed] = useState(false);
+
+  useEffect(() => {
+    setPage(isAdmin ? "dashboard" : isPharmacy ? "order-queue" : "fulfillment");
+  }, [isAdmin, isPharmacy]);
+
+  const nav = isAdmin ? ADMIN_NAV : isPharmacy ? PHARMACY_NAV : WAREHOUSE_NAV;
+
+  const renderPage = () => {
+    if (isAdmin) {
+      switch (page) {
+        case "dashboard": return <AdminDashboard />;
+        case "inventory": return <AdminInventory />;
+        case "refill-alerts": return <AdminRefillAlerts />;
+        case "orders": return <AdminOrders />;
+        case "safety-rules": return <AdminSafetyRules />;
+        case "agent-traces": return <AdminAgentTraces />;
+        case "webhook-logs": return <AdminWebhookLogs />;
+        case "patients": return <AdminPatients />;
+        case "pharmacy-grid": return <AdminPharmacyGrid />;
+        default: return <AdminDashboard />;
+      }
+    }
+    if (isPharmacy) {
+      switch (page) {
+        case "order-queue": return <PharmacyOrderQueue />;
+        case "verify-orders": return <PharmacyVerify />;
+        case "inventory": return <PharmacyInventory />;
+        case "exceptions": return <PharmacyExceptions />;
+        case "analytics": return <PharmacyAnalytics />;
+        default: return <PharmacyOrderQueue />;
+      }
+    }
+    // warehouse
+    switch (page) {
+      case "fulfillment": return <WarehouseFulfillment />;
+      case "pick-pack": return <WarehousePickPack />;
+      case "shelf-heatmap": return <WarehouseShelfHeatmap />;
+      case "dispatch": return <WarehouseDispatch />;
+      case "recalls": return <WarehouseRecall />;
+      default: return <WarehouseFulfillment />;
+    }
+  };
+
+  const roleColor = isAdmin ? T.orange : isPharmacy ? T.blue : T.green;
+
+  return (
+    <div style={{ minHeight: "100vh", background: T.gray100 }}>
+      {/* Top bar */}
+      <div style={{ position: "sticky", top: 0, zIndex: 50, background: T.navy900, height: 44, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 24px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <Logo size="sm" dark />
+          <span style={{ background: `${roleColor}20`, color: roleColor, padding: "3px 12px", borderRadius: 6, fontSize: 11, fontWeight: 700, textTransform: "uppercase" }}>
+            {isAdmin ? "Admin" : isPharmacy ? "Pharmacy" : "Warehouse"}
+          </span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: T.green }}><Wifi size={12} /> Systems OK</div>
+          <div style={{ width: 1, height: 20, background: T.navy600 }} />
+          <div style={{ width: 28, height: 28, borderRadius: "50%", background: T.navy700, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: T.white, fontWeight: 700 }}>{user?.avatar}</div>
+        </div>
+      </div>
+      {/* Body */}
+      <div style={{ display: "flex" }}>
+        <Sidebar items={nav} active={page} onSelect={setPage} role={role} collapsed={collapsed} onToggle={() => setCollapsed(!collapsed)} />
+        <main style={{ flex: 1, padding: 24, minHeight: "calc(100vh - 44px)", overflow: "auto" }}>
+          {renderPage()}
+        </main>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════ PROTECTED ROUTE ═══════ */
+function ProtectedRoute({ children }) {
+  const { user } = useAuth();
+  if (!user) return <Navigate to="/login" replace />;
+  return children;
+}
+
+/* ═══════ APP ROUTER ═══════ */
+function AppRoutes() {
+  const navigate = useNavigate();
+  const { user } = useAuth();
+
+  // Redirect to dashboard if already logged in
+  useEffect(() => {
+    if (user) navigate('/dashboard', { replace: true });
+  }, [user, navigate]);
+
+  return (
+    <Routes>
+      <Route path="/" element={<LandingPage onGoToLogin={() => navigate('/login')} />} />
+      <Route path="/login" element={user ? <Navigate to="/dashboard" replace /> : <LoginPage onBack={() => navigate('/')} />} />
+      <Route path="/login/admin" element={user ? <Navigate to="/dashboard" replace /> : <LoginPage onBack={() => navigate('/')} forcedRole="admin" />} />
+      <Route path="/login/pharmacy" element={user ? <Navigate to="/dashboard" replace /> : <LoginPage onBack={() => navigate('/')} forcedRole="pharmacy_store" />} />
+      <Route path="/login/warehouse" element={user ? <Navigate to="/dashboard" replace /> : <LoginPage onBack={() => navigate('/')} forcedRole="warehouse" />} />
+      <Route path="/dashboard" element={<ProtectedRoute><DashboardShell /></ProtectedRoute>} />
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  );
+}
+
+/* ═══════ ROOT APP ═══════ */
+export default function App() {
+  return (
+    <AuthProvider>
+      <AppRoutes />
+    </AuthProvider>
+  );
+}
+

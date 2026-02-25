@@ -9,9 +9,18 @@ from firebase_admin import auth as firebase_auth
 from database import get_db
 from config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
 from models.user import User, OTP
-from schemas.auth import SendOtpRequest, VerifyOtpRequest, GoogleAuthRequest, TokenResponse
+from schemas.auth import (
+    SendOtpRequest,
+    VerifyOtpRequest,
+    GoogleAuthRequest,
+    TokenResponse,
+    WebLoginRequest,
+)
+from services.security import verify_password
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+VALID_WEB_ROLES = {"admin", "pharmacy_store", "warehouse", "user"}
+ROLE_ALIASES = {"pharmacy": "pharmacy_store"}
 
 
 def create_access_token(data: dict) -> str:
@@ -19,6 +28,11 @@ def create_access_token(data: dict) -> str:
     expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def _normalize_role(role: str | None) -> str:
+    raw = (role or "user").strip().lower()
+    return ROLE_ALIASES.get(raw, raw)
 
 
 # ─── Google Sign-In via Firebase ───────────────────────────
@@ -54,6 +68,7 @@ def google_auth(req: GoogleAuthRequest, db: Session = Depends(get_db)):
         if not user.email and email:
             user.email = email
         user.is_verified = True
+        user.role = user.role or "user"
     else:
         # Create new user
         user = User(
@@ -63,16 +78,18 @@ def google_auth(req: GoogleAuthRequest, db: Session = Depends(get_db)):
             profile_picture=picture,
             is_verified=True,
             is_registered=False,
+            role="user",
         )
         db.add(user)
 
     db.commit()
 
-    token = create_access_token({"sub": str(user.id), "email": user.email})
+    token = create_access_token({"sub": str(user.id), "email": user.email, "role": user.role})
     return TokenResponse(
         access_token=token,
         user_id=user.id,
         is_registered=user.is_registered,
+        role=user.role,
         name=user.name,
         email=user.email,
         profile_picture=user.profile_picture,
@@ -110,19 +127,52 @@ def verify_otp(req: VerifyOtpRequest, db: Session = Depends(get_db)):
 
     user = db.query(User).filter(User.phone == req.phone).first()
     if not user:
-        user = User(phone=req.phone, is_verified=True)
+        user = User(phone=req.phone, is_verified=True, role="user")
         db.add(user)
         db.flush()
     else:
         user.is_verified = True
+        user.role = user.role or "user"
 
     db.commit()
 
-    token = create_access_token({"sub": str(user.id), "phone": user.phone})
+    token = create_access_token({"sub": str(user.id), "phone": user.phone, "role": user.role})
     return TokenResponse(
         access_token=token,
         user_id=user.id,
         is_registered=user.is_registered,
+        role=user.role,
+        name=user.name,
+        email=user.email,
+        profile_picture=user.profile_picture,
+    )
+
+
+@router.post("/web-login", response_model=TokenResponse)
+def web_login(req: WebLoginRequest, db: Session = Depends(get_db)):
+    email = req.email.strip().lower()
+    role = _normalize_role(req.role)
+    if role not in VALID_WEB_ROLES:
+        raise HTTPException(status_code=400, detail="Invalid role")
+
+    user = db.query(User).filter(User.email == email).first()
+    if not user or not verify_password(req.password, user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password",
+        )
+    if user.role != role:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Role mismatch. This account belongs to '{user.role}'",
+        )
+
+    token = create_access_token({"sub": str(user.id), "email": user.email, "role": user.role})
+    return TokenResponse(
+        access_token=token,
+        user_id=user.id,
+        is_registered=user.is_registered,
+        role=user.role,
         name=user.name,
         email=user.email,
         profile_picture=user.profile_picture,

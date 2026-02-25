@@ -16,6 +16,7 @@ class UserUpdate(BaseModel):
     age: int | None = None
     gender: str | None = None
     email: str | None = None
+    role: str | None = None
     push_token: str | None = None
     allergies: str | None = None
     conditions: str | None = None
@@ -29,6 +30,7 @@ class UserOut(BaseModel):
     age: int | None
     gender: str | None
     email: str | None
+    role: str
     push_token: str | None = None
     profile_picture: str | None = None
     allergies: str | None

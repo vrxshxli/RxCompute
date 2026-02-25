@@ -1,0 +1,98 @@
+/* ═══════════════════════════════════════════════════════════
+   RxCompute — Global Styles & CSS Variables
+   ═══════════════════════════════════════════════════════════ */
+
+:root {
+  /* Brand */
+  --navy-900: #0F1B2D;
+  --navy-800: #1B2A4A;
+  --navy-700: #253A5C;
+  --navy-600: #2E4A6E;
+  --rx-orange: #E8572A;
+  --rx-orange-hover: #D04A22;
+  --rx-blue: #1A6BB5;
+
+  /* Grays */
+  --gray-50: #F8FAFC;
+  --gray-100: #F1F5F9;
+  --gray-200: #E2E8F0;
+  --gray-300: #CBD5E1;
+  --gray-400: #94A3B8;
+  --gray-500: #64748B;
+  --gray-600: #475569;
+  --gray-700: #334155;
+  --gray-800: #1E293B;
+  --gray-900: #0F172A;
+
+  /* Semantic */
+  --green: #22C55E;
+  --yellow: #EAB308;
+  --red: #EF4444;
+  --purple: #8B5CF6;
+  --white: #FFFFFF;
+
+  /* Typography */
+  --font-display: 'Outfit', sans-serif;
+  --font-body: 'DM Sans', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-body);
+  background: var(--gray-100);
+  color: var(--gray-900);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-display);
+}
+
+input:focus {
+  border-color: var(--rx-blue) !important;
+  box-shadow: 0 0 0 3px rgba(26, 107, 181, 0.1) !important;
+  outline: none;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--gray-300);
+  border-radius: 3px;
+}
+
+/* Animations */
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(30px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(40px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes floatNode {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-8px); }
+}
+@keyframes pulseGlow {
+  0%, 100% { box-shadow: 0 0 20px rgba(232, 87, 42, 0.12); }
+  50% { box-shadow: 0 0 40px rgba(232, 87, 42, 0.25); }
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

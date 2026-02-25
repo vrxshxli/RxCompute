@@ -20,6 +20,7 @@ from routers import (
     home_router,
     chat_router,
     jobs_router,
+    webhooks_router,
 )
 
 # ─── Initialize Firebase Admin SDK ────────────────────────
@@ -90,6 +91,7 @@ app.include_router(user_medications_router)
 app.include_router(home_router)
 app.include_router(chat_router)
 app.include_router(jobs_router)
+app.include_router(webhooks_router)
 
 uploads_path = os.path.join(os.path.dirname(__file__), "uploads")
 os.makedirs(uploads_path, exist_ok=True)

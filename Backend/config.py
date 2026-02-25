@@ -27,3 +27,8 @@ SMTP_FALLBACK_TO_EMAIL = os.getenv("SMTP_FALLBACK_TO_EMAIL", "deepakm7778@gmail.
 
 # Secret for external scheduler endpoint (e.g., cron-job.org)
 JOB_RUN_KEY = os.getenv("JOB_RUN_KEY", "")
+
+# Outgoing webhooks
+WEBHOOK_TARGET_URL = os.getenv("WEBHOOK_TARGET_URL", "")
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
+WEBHOOK_TIMEOUT_SECONDS = int(os.getenv("WEBHOOK_TIMEOUT_SECONDS", "8"))
