@@ -105,6 +105,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   int? _draftStrips;
   String? _draftPrescriptionUrl;
   String? _draftPaymentMethod;
+  bool _stripsSelectedByUser = false;
   String? _lastSearchQuery;
   List<MedicineModel> _candidateMedicines = const [];
   _ChatLang _lang = _ChatLang.hi;
@@ -127,6 +128,25 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
 
     if (saved.isNotEmpty) {
       final restored = saved.map(_decodeMessage).whereType<ChatMessage>().toList();
+      if (restored.isEmpty) {
+        final initial = [
+          ChatMessage(
+            id: '${DateTime.now().millisecondsSinceEpoch}',
+            isUser: false,
+            text: 'Please choose language:\n1) Hindi\n2) English',
+            timestamp: DateTime.now(),
+          ),
+        ];
+        emit(
+          state.copyWith(
+            awaitingLanguage: true,
+            languageCode: _lang.code,
+            messages: initial,
+          ),
+        );
+        await _persistChat(initial);
+        return;
+      }
       emit(
         state.copyWith(
           awaitingLanguage: false,
@@ -210,12 +230,14 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   void _onUpdateDraftStrips(UpdateDraftStripsEvent event, Emitter<ChatState> emit) {
     if (event.strips > 0) {
       _draftStrips = event.strips;
+      _stripsSelectedByUser = true;
     }
   }
 
   Future<void> _onSelectMedicine(SelectMedicineEvent event, Emitter<ChatState> emit) async {
     _draftMedicine = _withPredictedRx([event.medicine]).first;
-    _draftStrips = _draftMedicine!.quantity > 0 ? _draftMedicine!.quantity : (_draftStrips ?? 1);
+    _draftStrips = null;
+    _stripsSelectedByUser = false;
     _stage = _ChatStage.dosage;
     if (_lastSearchQuery != null && _lastSearchQuery!.isNotEmpty) {
       await _saveAlias(_lastSearchQuery!, _draftMedicine!.id);
@@ -340,7 +362,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       final selected = _selectFromCandidates(l);
       if (selected != null) {
         _draftMedicine = selected;
-        _draftStrips = selected.quantity > 0 ? selected.quantity : (_draftStrips ?? 1);
+        _draftStrips = null;
+        _stripsSelectedByUser = false;
         _stage = _ChatStage.dosage;
         if (_lastSearchQuery != null && _lastSearchQuery!.isNotEmpty) {
           await _saveAlias(_lastSearchQuery!, selected.id);
@@ -372,7 +395,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
 
     if (_stage == _ChatStage.dosage && _draftMedicine != null) {
       _draftDosage = text.trim();
-      if ((_draftStrips ?? 0) > 0) {
+      if (_stripsSelectedByUser && (_draftStrips ?? 0) > 0) {
         if (_draftMedicine!.rxRequired && (_draftPrescriptionUrl == null || _draftPrescriptionUrl!.isEmpty)) {
           _stage = _ChatStage.prescription;
           return [
@@ -624,6 +647,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     _draftMedicine = null;
     _draftDosage = null;
     _draftStrips = null;
+      _stripsSelectedByUser = false;
     _draftPrescriptionUrl = null;
     _draftPaymentMethod = null;
     _candidateMedicines = const [];

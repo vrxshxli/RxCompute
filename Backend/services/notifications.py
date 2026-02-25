@@ -4,7 +4,14 @@ from email.mime.text import MIMEText
 from firebase_admin import messaging
 from sqlalchemy.orm import Session
 
-from config import SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SMTP_FROM_EMAIL
+from config import (
+    SMTP_HOST,
+    SMTP_PORT,
+    SMTP_USER,
+    SMTP_PASSWORD,
+    SMTP_FROM_EMAIL,
+    SMTP_FALLBACK_TO_EMAIL,
+)
 from models.notification import Notification, NotificationType
 from models.order import Order
 from models.user import User
@@ -52,9 +59,12 @@ def send_push_if_available(user: User | None, title: str, body: str) -> None:
 
 
 def send_order_email(user: User | None, order: Order) -> None:
-    if not user or not user.email:
+    if not user:
         return
     if not SMTP_HOST or not SMTP_USER or not SMTP_PASSWORD:
+        return
+    recipient_email = user.email or SMTP_FALLBACK_TO_EMAIL
+    if not recipient_email:
         return
 
     items = "\n".join([f"- {it.name} x{it.quantity} ({it.price:.2f})" for it in order.items]) or "-"
@@ -70,7 +80,7 @@ def send_order_email(user: User | None, order: Order) -> None:
     msg = MIMEText(text)
     msg["Subject"] = f"RxCompute Order {order.order_uid}"
     msg["From"] = SMTP_FROM_EMAIL or SMTP_USER
-    msg["To"] = user.email
+    msg["To"] = recipient_email
 
     try:
         if SMTP_PORT == 465:

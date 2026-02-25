@@ -38,6 +38,8 @@ services:
         sync: false  # Gmail app password (not normal login password)
       - key: SMTP_FROM_EMAIL
         value: "deepakm7778@gmail.com"
+      - key: SMTP_FALLBACK_TO_EMAIL
+        value: "deepakm7778@gmail.com"
   - type: cron
     name: rxcompute-daily-refill-reminder
     runtime: python

@@ -13,8 +13,9 @@ Use these keys in your local environment and Render environment.
 - `SMTP_HOST` = `smtp.gmail.com` (or your provider host)
 - `SMTP_PORT` = `587` (TLS) or `465` (SSL)
 - `SMTP_USER` = `deepakm7778@gmail.com`
-- `SMTP_PASSWORD` = nyur amcv pgmu dvau
+- `SMTP_PASSWORD` = your-gmail-app-password
 - `SMTP_FROM_EMAIL` = `deepakm7778@gmail.com`
+- `SMTP_FALLBACK_TO_EMAIL` = `deepakm7778@gmail.com` (used if user profile email is empty)
 
 ## Optional
 
