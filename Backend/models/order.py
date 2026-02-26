@@ -29,6 +29,11 @@ class Order(Base):
     total = Column(Float, default=0.0)
     pharmacy = Column(String(50), nullable=True)
     payment_method = Column(String(50), nullable=True)
+    pharmacy_approved_by_name = Column(String(120), nullable=True)
+    pharmacy_approved_at = Column(DateTime(timezone=True), nullable=True)
+    last_status_updated_by_role = Column(String(40), nullable=True)
+    last_status_updated_by_name = Column(String(120), nullable=True)
+    last_status_updated_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

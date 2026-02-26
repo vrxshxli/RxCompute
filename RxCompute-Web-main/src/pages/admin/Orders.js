@@ -4,7 +4,7 @@ import { StatusPill, SearchInput, Btn, PageHeader } from '../../components/share
 import { useAuth } from '../../context/AuthContext';
 
 export default function AdminOrders() {
-  const { token, apiBase } = useAuth();
+  const { token, apiBase, user } = useAuth();
   const [search, setSearch] = useState("");
   const [orders, setOrders] = useState([]);
   const [users, setUsers] = useState([]);
@@ -51,6 +51,11 @@ export default function AdminOrders() {
         status: o.status,
         total_price: o.total || 0,
         pharmacy_node: o.pharmacy || "-",
+        pharmacy_approved_by_name: o.pharmacy_approved_by_name || null,
+        pharmacy_approved_at: o.pharmacy_approved_at || null,
+        last_status_updated_by_role: o.last_status_updated_by_role || null,
+        last_status_updated_by_name: o.last_status_updated_by_name || null,
+        last_status_updated_at: o.last_status_updated_at || null,
         items: o.items || [],
       })),
     [orders, userMap],
@@ -66,7 +71,15 @@ export default function AdminOrders() {
   filtered.forEach(o => { if(!groups[o.status]) groups[o.status]=[]; groups[o.status].push(o); });
   const statusOrder = ["pending","confirmed","verified","picking","packed","dispatched","delivered","cancelled"];
   const statusColor = {pending:T.yellow,confirmed:T.blue,verified:T.green,picking:T.yellow,packed:T.blue,dispatched:T.green,delivered:T.green,cancelled:T.red};
-  const statusOptions = ["pending","confirmed","verified","picking","packed","dispatched","delivered","cancelled"];
+  const getStatusOptions = (current) => {
+    if (user?.role !== "admin") return [current];
+    if (current === "pending") return ["pending"];
+    if (current === "verified") return ["verified", "picking", "cancelled"];
+    if (current === "picking") return ["picking", "packed", "cancelled"];
+    if (current === "packed") return ["packed", "dispatched", "cancelled"];
+    if (current === "dispatched") return ["dispatched", "delivered", "cancelled"];
+    return [current];
+  };
 
   const updateStatus = async (orderId, status) => {
     if (!token) return;
@@ -115,15 +128,21 @@ export default function AdminOrders() {
                 <div style={{ fontSize:13, fontWeight:600, color:T.gray900, marginBottom:4 }}>{o.patient_name}</div>
                 <div style={{ fontSize:12, color:T.gray500, marginBottom:6 }}>{o.items.length} items · {o.pharmacy_node}</div>
                 <div style={{ fontSize:15, fontWeight:700, color:T.blue, marginBottom:8 }}>₹{o.total_price.toFixed(2)}</div>
+                {(o.pharmacy_approved_by_name || o.last_status_updated_by_name) ? (
+                  <div style={{ fontSize:11, color:T.gray500, marginBottom:8 }}>
+                    {o.pharmacy_approved_by_name ? `Pharmacy approved by ${o.pharmacy_approved_by_name}` : `${o.last_status_updated_by_role || "staff"}: ${o.last_status_updated_by_name || "-"}`}{" · "}
+                    {new Date(o.pharmacy_approved_at || o.last_status_updated_at || Date.now()).toLocaleString()}
+                  </div>
+                ) : null}
                 <div style={{ display:"flex", gap:8, alignItems:"center" }}>
                   <StatusPill status={o.status} size="xs" />
                   <select
                     value={o.status}
                     onChange={(e) => updateStatus(o.id, e.target.value)}
-                    disabled={savingId === o.id}
+                    disabled={savingId === o.id || getStatusOptions(o.status).length === 1}
                     style={{ fontSize:11, padding:"4px 6px", border:`1px solid ${T.gray200}`, borderRadius:6 }}
                   >
-                    {statusOptions.map((s) => (
+                    {getStatusOptions(o.status).map((s) => (
                       <option key={s} value={s}>{s.replace(/_/g," ")}</option>
                     ))}
                   </select>

@@ -41,6 +41,11 @@ class OrderOut(BaseModel):
     total: float
     pharmacy: str | None
     payment_method: str | None
+    pharmacy_approved_by_name: str | None = None
+    pharmacy_approved_at: datetime | None = None
+    last_status_updated_by_role: str | None = None
+    last_status_updated_by_name: str | None = None
+    last_status_updated_at: datetime | None = None
     items: list[OrderItemOut] = []
     created_at: datetime | None
     updated_at: datetime | None

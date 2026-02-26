@@ -159,6 +159,37 @@ def update_order_status(
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid order status")
 
+    if new_status.value == old_status:
+        return order
+
+    # Pharmacy must approve first. Admin handles downstream logistics.
+    if current_user.role == "pharmacy_store":
+        if old_status != OrderStatus.pending.value:
+            raise HTTPException(status_code=403, detail="Pharmacy can approve only pending orders")
+        if new_status not in {OrderStatus.verified, OrderStatus.cancelled}:
+            raise HTTPException(status_code=403, detail="Pharmacy can set only VERIFIED or CANCELLED")
+    elif current_user.role == "admin":
+        allowed_for_admin = {
+            OrderStatus.picking,
+            OrderStatus.packed,
+            OrderStatus.dispatched,
+            OrderStatus.delivered,
+            OrderStatus.cancelled,
+        }
+        if new_status not in allowed_for_admin:
+            raise HTTPException(status_code=403, detail="Admin can update only logistics statuses")
+        if new_status in {OrderStatus.picking, OrderStatus.packed, OrderStatus.dispatched, OrderStatus.delivered}:
+            if old_status not in {
+                OrderStatus.verified.value,
+                OrderStatus.picking.value,
+                OrderStatus.packed.value,
+                OrderStatus.dispatched.value,
+            }:
+                raise HTTPException(status_code=400, detail="Order must be pharmacy-approved first")
+    else:
+        # Warehouse role is read-only in this workflow.
+        raise HTTPException(status_code=403, detail="Warehouse cannot update order status in current workflow")
+
     # On first approval (pending -> confirmed/verified), reserve stock from inventory.
     if old_status == OrderStatus.pending.value and new_status in {OrderStatus.confirmed, OrderStatus.verified}:
         med_ids = [it.medicine_id for it in order.items]
@@ -179,18 +210,26 @@ def update_order_status(
             units_to_reduce = it.strips_count if (it.strips_count or 0) > 0 else max(it.quantity, 1)
             med.stock = (med.stock or 0) - units_to_reduce
 
+    now = datetime.utcnow()
     order.status = new_status
+    order.last_status_updated_by_role = current_user.role
+    order.last_status_updated_by_name = current_user.name or current_user.email or f"User #{current_user.id}"
+    order.last_status_updated_at = now
+    if current_user.role == "pharmacy_store" and new_status == OrderStatus.verified:
+        order.pharmacy_approved_by_name = current_user.name or current_user.email or f"User #{current_user.id}"
+        order.pharmacy_approved_at = now
     db.commit()
     db.refresh(order)
 
-    if new_status.value in {OrderStatus.confirmed.value, OrderStatus.dispatched.value, OrderStatus.delivered.value, OrderStatus.verified.value}:
-        order_owner = db.query(User).filter(User.id == order.user_id).first() or current_user
+    if new_status.value != OrderStatus.pending.value:
+        order_owner = db.query(User).filter(User.id == order.user_id).first()
         title = "Order Update"
         body = f"{order.order_uid} status is now {new_status.value.upper()}"
         create_notification(db, order.user_id, NotificationType.order, title, body, has_action=True)
         db.commit()
-        send_push_if_available(order_owner, title, body)
-        send_order_email(order_owner, order)
+        if order_owner:
+            send_push_if_available(order_owner, title, body)
+            send_order_email(order_owner, order)
     dispatch_webhook(
         db,
         event_type="order_status_updated",

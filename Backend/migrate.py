@@ -83,6 +83,23 @@ def migrate():
             else:
                 print(f"  · Column already exists: order_items.{col_name}")
 
+        # 4b. Add missing columns to 'orders' table for audit trail
+        order_cols = get_existing_columns(conn, "orders")
+        order_migrations = [
+            ("pharmacy_approved_by_name", "VARCHAR(120)"),
+            ("pharmacy_approved_at", "TIMESTAMP WITH TIME ZONE"),
+            ("last_status_updated_by_role", "VARCHAR(40)"),
+            ("last_status_updated_by_name", "VARCHAR(120)"),
+            ("last_status_updated_at", "TIMESTAMP WITH TIME ZONE"),
+        ]
+        for col_name, col_type in order_migrations:
+            if col_name not in order_cols:
+                conn.execute(text(f"ALTER TABLE orders ADD COLUMN {col_name} {col_type}"))
+                conn.commit()
+                print(f"  ✓ Added column: orders.{col_name}")
+            else:
+                print(f"  · Column already exists: orders.{col_name}")
+
         # 5. Add missing columns to 'medicines' table
         medicine_cols = get_existing_columns(conn, "medicines")
         if "image_url" not in medicine_cols:
