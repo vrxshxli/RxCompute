@@ -61,8 +61,16 @@ export function NotificationProvider({ children }) {
     }
     fetchNotifications();
     pollRef.current = window.setInterval(fetchNotifications, 5000);
+    const onFocus = () => fetchNotifications();
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") fetchNotifications();
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
     return () => {
       if (pollRef.current) window.clearInterval(pollRef.current);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [token, apiBase]);
 

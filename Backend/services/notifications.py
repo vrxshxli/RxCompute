@@ -1,5 +1,7 @@
 import smtplib
+import socket
 import traceback
+from datetime import datetime, timedelta
 from email.mime.text import MIMEText
 
 import firebase_admin
@@ -19,7 +21,24 @@ def create_notification(
     title: str,
     body: str,
     has_action: bool = True,
+    dedupe_window_minutes: int | None = 2,
 ) -> Notification:
+    if dedupe_window_minutes and dedupe_window_minutes > 0:
+        cutoff = datetime.utcnow() - timedelta(minutes=dedupe_window_minutes)
+        existing = (
+            db.query(Notification)
+            .filter(
+                Notification.user_id == user_id,
+                Notification.type == type_,
+                Notification.title == title,
+                Notification.body == body,
+                Notification.created_at >= cutoff,
+            )
+            .order_by(Notification.created_at.desc())
+            .first()
+        )
+        if existing:
+            return existing
     notif = Notification(
         user_id=user_id,
         type=type_,
@@ -53,8 +72,9 @@ def send_push_if_available(user: User | None, title: str, body: str) -> None:
             ),
         )
         messaging.send(msg)
-    except Exception:
-        print("Push send failed")
+    except Exception as exc:
+        print(f"Push send failed for user {user.id if user else 'n/a'}: {exc}")
+        traceback.print_exc()
         # Push failures should not break business flow.
         return
 
@@ -154,15 +174,48 @@ def _send_email(recipient_email: str, subject: str, body: str) -> None:
     msg["Subject"] = subject
     msg["From"] = SMTP_FROM_EMAIL or SMTP_USER
     msg["To"] = recipient_email
-    if SMTP_PORT == 465:
-        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=12) as server:
-            server.login(SMTP_USER, SMTP_PASSWORD)
-            server.send_message(msg)
-        return
-    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=12) as server:
-        server.ehlo()
-        if server.has_extn("starttls"):
-            server.starttls()
-            server.ehlo()
-        server.login(SMTP_USER, SMTP_PASSWORD)
-        server.send_message(msg)
+    preferred_ports: list[int] = []
+    for p in [SMTP_PORT, 587, 2525, 465]:
+        if p not in preferred_ports:
+            preferred_ports.append(p)
+
+    last_exc: Exception | None = None
+    for port in preferred_ports:
+        try:
+            _send_email_with_port(msg, port)
+            return
+        except Exception as exc:
+            last_exc = exc
+            print(f"Email attempt failed on {SMTP_HOST}:{port} -> {exc}")
+            continue
+    if last_exc:
+        raise last_exc
+
+
+def _send_email_with_port(msg: MIMEText, port: int) -> None:
+    # Resolve IPv4 explicitly to avoid IPv6-only route issues on some hosts.
+    ipv4_rows = socket.getaddrinfo(SMTP_HOST, port, socket.AF_INET, socket.SOCK_STREAM)
+    if not ipv4_rows:
+        raise OSError(f"No IPv4 address resolved for {SMTP_HOST}:{port}")
+    last_exc: Exception | None = None
+    for row in ipv4_rows:
+        ip = row[4][0]
+        try:
+            if port == 465:
+                with smtplib.SMTP_SSL(ip, port, timeout=12) as server:
+                    server.login(SMTP_USER, SMTP_PASSWORD)
+                    server.send_message(msg)
+                return
+            with smtplib.SMTP(ip, port, timeout=12) as server:
+                server.ehlo()
+                if server.has_extn("starttls"):
+                    server.starttls()
+                    server.ehlo()
+                server.login(SMTP_USER, SMTP_PASSWORD)
+                server.send_message(msg)
+            return
+        except Exception as exc:
+            last_exc = exc
+            continue
+    if last_exc:
+        raise last_exc
