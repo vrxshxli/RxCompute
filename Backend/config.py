@@ -18,17 +18,27 @@ FIREBASE_PROJECT_ID = os.getenv("FIREBASE_PROJECT_ID", "")
 
 # SMTP config (Maileroo defaults; can be overridden via env vars)
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.maileroo.com")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
-SMTP_USER = os.getenv("SMTP_USER", "rxcompute@35ddfa3956a414ee.maileroo.org")
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "f71f20a46ffb0046b73d746b").replace(" ", "")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "2525"))
+DEFAULT_MAILEROO_SMTP_USER = "rxcompute@35ddfa3956a414ee.maileroo.org"
+DEFAULT_MAILEROO_SMTP_PASSWORD = "f71f20a46ffb0046b73d746b"
+DEFAULT_MAILEROO_API_KEY = "5bb8ad0fa0487a4f2bb77d40d90c7565974f89d1054160c752eed794232b4d6a"
+SMTP_USER = os.getenv("SMTP_USER", DEFAULT_MAILEROO_SMTP_USER)
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", DEFAULT_MAILEROO_SMTP_PASSWORD).replace(" ", "")
 SMTP_FROM_EMAIL = os.getenv("SMTP_FROM_EMAIL", SMTP_USER)
 SMTP_FALLBACK_TO_EMAIL = os.getenv("SMTP_FALLBACK_TO_EMAIL", SMTP_FROM_EMAIL)
-MAILEROO_API_KEY = os.getenv("MAILEROO_API_KEY", "5bb8ad0fa0487a4f2bb77d40d90c7565974f89d1054160c752eed794232b4d6a")
+MAILEROO_API_KEY = os.getenv("MAILEROO_API_KEY", DEFAULT_MAILEROO_API_KEY)
 MAILEROO_API_URL = os.getenv("MAILEROO_API_URL", "https://smtp.maileroo.com/api/v2/emails")
 
 # Prevent stale Gmail env from breaking delivery on restricted networks.
 if "gmail.com" in SMTP_HOST.lower() and os.getenv("ALLOW_GMAIL_SMTP", "").lower() not in {"1", "true", "yes"}:
     SMTP_HOST = "smtp.maileroo.com"
+
+# Guard against stale Render vars pointing to Gmail sender/account.
+if SMTP_USER.lower().endswith("@gmail.com"):
+    SMTP_USER = DEFAULT_MAILEROO_SMTP_USER
+    SMTP_PASSWORD = DEFAULT_MAILEROO_SMTP_PASSWORD
+if SMTP_FROM_EMAIL.lower().endswith("@gmail.com"):
+    SMTP_FROM_EMAIL = SMTP_USER
 
 # Maileroo API keys are domain-restricted; ensure sender domain stays authorized.
 _smtp_user_domain = SMTP_USER.split("@")[-1].lower() if "@" in SMTP_USER else ""
