@@ -102,7 +102,7 @@ export default function PharmacyOrderQueue() {
     <div style={{display:"flex",gap:8}}>
       {type==="urgent"&&<><Btn variant="primary" size="sm" disabled={savingId===order.id} onClick={()=>setStatus(order.id,"verified")}>Approve Rx</Btn><Btn variant="secondary" size="sm" style={{color:T.red}} disabled={savingId===order.id} onClick={()=>setStatus(order.id,"cancelled")}>Reject</Btn></>}
       {type==="normal"&&<><Btn variant="success" size="sm" disabled={savingId===order.id} onClick={()=>setStatus(order.id,"verified")}><CheckCircle size={12}/>Approve</Btn><Btn variant="secondary" size="sm" disabled={savingId===order.id} onClick={()=>setStatus(order.id,"cancelled")}>Reject</Btn></>}
-      {type==="scheduled"&&<Btn variant="secondary" size="sm" disabled={savingId===order.id} onClick={()=>setStatus(order.id,"dispatched")}>Mark Dispatch</Btn>}
+      {type==="scheduled"&&<span style={{fontSize:11,color:T.gray500}}>Status is handled by admin logistics</span>}
     </div>
   </div>;
   return (<div><PageHeader title="Order Queue" badge={String(mapped.length)} actions={<Btn variant="success" size="sm" onClick={load}><CheckCircle size={14}/>Refresh</Btn>}/>

@@ -287,8 +287,8 @@ def _send_email_via_maileroo_api(recipient_email: str, subject: str, body: str) 
         raise RuntimeError("MAILEROO_API_KEY is missing")
 
     payload = {
-        "from": {"email": SMTP_FROM_EMAIL or SMTP_USER},
-        "to": [{"email": recipient_email}],
+        "from": {"address": SMTP_FROM_EMAIL or SMTP_USER},
+        "to": [{"address": recipient_email}],
         "subject": subject,
         "text": body,
     }

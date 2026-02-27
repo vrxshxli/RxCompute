@@ -426,6 +426,35 @@ def admin_send_to_warehouse(
     )
 
 
+@router.post("/transfers/warehouse-to-admin")
+def warehouse_send_to_admin(
+    data: AdminToWarehouseCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _ensure_warehouse_or_admin(current_user)
+    if data.quantity <= 0:
+        raise HTTPException(status_code=400, detail="Quantity must be positive")
+    med = db.query(Medicine).filter(Medicine.id == data.medicine_id).first()
+    if not med:
+        raise HTTPException(status_code=404, detail="Medicine not found")
+    stock = db.query(WarehouseStock).filter(WarehouseStock.medicine_id == med.id).first()
+    available = stock.quantity if stock else 0
+    if available < data.quantity:
+        raise HTTPException(status_code=400, detail=f"Insufficient warehouse stock for {med.name}")
+    stock.quantity = available - data.quantity
+    med.stock = (med.stock or 0) + data.quantity
+    db.commit()
+    return {
+        "message": "Sent to admin inventory",
+        "medicine_id": med.id,
+        "medicine_name": med.name,
+        "quantity": data.quantity,
+        "admin_stock": med.stock,
+        "warehouse_stock": stock.quantity,
+    }
+
+
 @router.post("/transfers/warehouse-to-pharmacy", response_model=WarehouseTransferOut)
 def warehouse_send_to_pharmacy(
     data: WarehouseToPharmacyCreate,

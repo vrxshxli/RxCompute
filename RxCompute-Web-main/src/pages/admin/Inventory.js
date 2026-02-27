@@ -37,9 +37,20 @@ export default function AdminInventory() {
     if (!token) return;
     const headers = { Authorization: `Bearer ${token}` };
     try {
-      const res = await fetch(`${apiBase}/medicines/?limit=500`, { headers });
-      if (!res.ok) return;
-      const data = await res.json();
+      const [medRes, breakdownRes] = await Promise.all([
+        fetch(`${apiBase}/medicines/?limit=500`, { headers }),
+        fetch(`${apiBase}/warehouse/stock-breakdown`, { headers }),
+      ]);
+      if (!medRes.ok) return;
+      const data = await medRes.json();
+      let bmap = {};
+      if (breakdownRes.ok) {
+        const bdata = await breakdownRes.json();
+        bmap = (Array.isArray(bdata) ? bdata : []).reduce((acc, row) => {
+          acc[row.medicine_id] = row;
+          return acc;
+        }, {});
+      }
       const mapped = (Array.isArray(data) ? data : []).map((m) => ({
         id: m.id,
         name: m.name,
@@ -47,6 +58,8 @@ export default function AdminInventory() {
         price: m.price,
         package_size: m.package || "-",
         stock: m.stock || 0,
+        warehouse_stock: bmap[m.id]?.warehouse_stock || 0,
+        pharmacy_stock: bmap[m.id]?.pharmacy_stock_dispatched || 0,
         rx: !!m.rx_required,
         category: m.description ? "General" : "-",
       }));
@@ -303,6 +316,9 @@ export default function AdminInventory() {
             <div style={{ display:"flex", justifyContent:"space-between", marginTop:8 }}>
               <span style={{ fontSize:11, color:T.gray400 }}>{m.package_size}</span>
               <span style={{ fontSize:11, color:T.gray400 }}>{m.category}</span>
+            </div>
+            <div style={{ marginTop:8, fontSize:11, color:T.gray500 }}>
+              Warehouse: {m.warehouse_stock} · Pharmacy dispatched: {m.pharmacy_stock}
             </div>
             <div style={{ display:"flex", gap:8, marginTop:10 }}>
               <Btn variant="secondary" size="sm" onClick={() => openEdit(m)}>Edit</Btn>

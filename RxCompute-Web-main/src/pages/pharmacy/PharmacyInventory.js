@@ -20,6 +20,8 @@ export default function PharmacyInventory() {
       } catch (_) {}
     };
     load();
+    const timer = window.setInterval(load, 10000);
+    return () => window.clearInterval(timer);
   }, [token, apiBase]);
   const medicines = useMemo(() => {
     const dispatched = transfers.filter((x) => x.status === "dispatched");

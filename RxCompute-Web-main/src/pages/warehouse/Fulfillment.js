@@ -12,10 +12,12 @@ export default function WarehouseFulfillment() {
   const [pharmacies, setPharmacies] = useState([]);
   const [savingTransferId, setSavingTransferId] = useState(null);
   const [showSendPharmacy, setShowSendPharmacy] = useState(false);
+  const [showSendAdmin, setShowSendAdmin] = useState(false);
   const [showSingleAdd, setShowSingleAdd] = useState(false);
   const [showBulkAdd, setShowBulkAdd] = useState(false);
   const [showCsvAdd, setShowCsvAdd] = useState(false);
   const [sendMsg, setSendMsg] = useState("");
+  const [sendAdminMsg, setSendAdminMsg] = useState("");
   const [singleMsg, setSingleMsg] = useState("");
   const [bulkMsg, setBulkMsg] = useState("");
   const [csvMsg, setCsvMsg] = useState("");
@@ -26,6 +28,11 @@ export default function WarehouseFulfillment() {
     medicine_id: "",
     quantity: "10",
     pharmacy_store_id: "",
+    note: "",
+  });
+  const [sendAdminForm, setSendAdminForm] = useState({
+    medicine_id: "",
+    quantity: "10",
     note: "",
   });
   const [singleForm, setSingleForm] = useState({
@@ -123,6 +130,38 @@ export default function WarehouseFulfillment() {
       await load();
     } catch (_) {
       setSendMsg("Network error while creating transfer");
+    }
+  };
+
+  const sendToAdmin = async () => {
+    if (!token || !sendAdminForm.medicine_id || Number(sendAdminForm.quantity) <= 0) {
+      setSendAdminMsg("Choose medicine and valid quantity");
+      return;
+    }
+    setSendAdminMsg("");
+    try {
+      const res = await fetch(`${apiBase}/warehouse/transfers/warehouse-to-admin`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          medicine_id: Number(sendAdminForm.medicine_id),
+          quantity: Number(sendAdminForm.quantity),
+          note: sendAdminForm.note.trim() || null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setSendAdminMsg(data?.detail || "Unable to send medicine to admin");
+        return;
+      }
+      setSendAdminMsg("Sent to admin inventory");
+      setSendAdminForm({ medicine_id: "", quantity: "10", note: "" });
+      await load();
+    } catch (_) {
+      setSendAdminMsg("Network error while creating transfer");
     }
   };
 
@@ -346,6 +385,7 @@ export default function WarehouseFulfillment() {
             <Btn variant="secondary" size="sm" onClick={() => setShowBulkAdd((v) => !v)}><Upload size={12} />{showBulkAdd ? "Close Bulk" : "Bulk Upload"}</Btn>
             <Btn variant="secondary" size="sm" onClick={() => setShowCsvAdd((v) => !v)}><Upload size={12} />{showCsvAdd ? "Close CSV" : "CSV Upload"}</Btn>
             <Btn variant="secondary" size="sm" onClick={downloadCsvTemplate}><Download size={12} />CSV Format</Btn>
+            <Btn variant="secondary" size="sm" onClick={() => setShowSendAdmin((v) => !v)}><PlusCircle size={12} />{showSendAdmin ? "Close" : "Send Medicine to Admin"}</Btn>
             <Btn variant="secondary" size="sm" onClick={() => setShowSendPharmacy((v) => !v)}><PlusCircle size={12} />{showSendPharmacy ? "Close" : "Send Medicine to Pharmacy"}</Btn>
           </>
         }
@@ -409,6 +449,20 @@ export default function WarehouseFulfillment() {
           </div>
           {pharmacies.length === 0 ? <div style={{ marginTop: 8, fontSize: 12, color: T.red }}>No pharmacy configured yet. Create pharmacy user/store first.</div> : null}
           {sendMsg ? <div style={{ marginTop: 8, fontSize: 12, color: sendMsg === "Transfer created" ? T.green : T.red }}>{sendMsg}</div> : null}
+        </div>
+      ) : null}
+      {showSendAdmin ? (
+        <div style={{ background: T.white, border: `1px solid ${T.gray200}`, borderRadius: 12, padding: 14, marginBottom: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 2fr auto", gap: 8 }}>
+            <select value={sendAdminForm.medicine_id} onChange={(e) => setSendAdminForm({ ...sendAdminForm, medicine_id: e.target.value })} style={{ padding: 10, border: `1px solid ${T.gray200}`, borderRadius: 8 }}>
+              <option value="">Select medicine</option>
+              {stock.map((m) => <option key={m.medicine_id} value={m.medicine_id}>{m.medicine_name} (warehouse stock: {m.quantity || 0})</option>)}
+            </select>
+            <input value={sendAdminForm.quantity} onChange={(e) => setSendAdminForm({ ...sendAdminForm, quantity: e.target.value })} placeholder="Units" type="number" style={{ padding: 10, border: `1px solid ${T.gray200}`, borderRadius: 8 }} />
+            <input value={sendAdminForm.note} onChange={(e) => setSendAdminForm({ ...sendAdminForm, note: e.target.value })} placeholder="Note (optional)" style={{ padding: 10, border: `1px solid ${T.gray200}`, borderRadius: 8 }} />
+            <Btn variant="primary" size="sm" onClick={sendToAdmin}>Create</Btn>
+          </div>
+          {sendAdminMsg ? <div style={{ marginTop: 8, fontSize: 12, color: sendAdminMsg === "Sent to admin inventory" ? T.green : T.red }}>{sendAdminMsg}</div> : null}
         </div>
       ) : null}
       <div style={{ marginBottom: 12, background: T.white, border: `1px solid ${T.gray200}`, borderRadius: 12, padding: 14 }}>
