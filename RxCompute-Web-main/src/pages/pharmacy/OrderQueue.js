@@ -9,6 +9,7 @@ export default function PharmacyOrderQueue() {
   const [users, setUsers] = useState([]);
   const [savingId, setSavingId] = useState(null);
   const [queueFilter, setQueueFilter] = useState("all");
+  const [error, setError] = useState("");
 
   const load = async () => {
     if (!token) return;
@@ -71,8 +72,9 @@ export default function PharmacyOrderQueue() {
   const setStatus = async (orderId, status) => {
     if (!token) return;
     setSavingId(orderId);
+    setError("");
     try {
-      await fetch(`${apiBase}/orders/${orderId}/status`, {
+      const res = await fetch(`${apiBase}/orders/${orderId}/status`, {
         method: "PUT",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -80,8 +82,14 @@ export default function PharmacyOrderQueue() {
         },
         body: JSON.stringify({ status }),
       });
-      await load();
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data?.detail?.message || data?.detail || "Failed to update status");
+      } else {
+        await load();
+      }
     } catch (_) {
+      setError("Network error while updating status");
     } finally {
       setSavingId(null);
     }
@@ -106,6 +114,7 @@ export default function PharmacyOrderQueue() {
     </div>
   </div>;
   return (<div><PageHeader title="Order Queue" badge={String(mapped.length)} actions={<Btn variant="success" size="sm" onClick={load}><CheckCircle size={14}/>Refresh</Btn>}/>
+  {error ? <div style={{ marginBottom:10, color:T.red, fontSize:12 }}>{error}</div> : null}
   <div style={{display:"flex",gap:10,marginBottom:12,alignItems:"center"}}>
     <span style={{fontSize:12,color:T.gray500}}>Filter:</span>
     <select value={queueFilter} onChange={(e)=>setQueueFilter(e.target.value)} style={{padding:"8px 10px",border:`1px solid ${T.gray200}`,borderRadius:8,fontSize:12}}>

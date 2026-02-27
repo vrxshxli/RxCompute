@@ -286,31 +286,39 @@ def _send_email_via_maileroo_api(recipient_email: str, subject: str, body: str) 
     if not MAILEROO_API_KEY:
         raise RuntimeError("MAILEROO_API_KEY is missing")
 
-    payload = {
-        "from": {"address": SMTP_FROM_EMAIL or SMTP_USER},
-        "to": [{"address": recipient_email}],
-        "subject": subject,
-        "text": body,
-    }
-    raw = json.dumps(payload).encode("utf-8")
-    req = urllib_request.Request(
-        MAILEROO_API_URL,
-        data=raw,
-        method="POST",
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {MAILEROO_API_KEY}",
-            "X-API-Key": MAILEROO_API_KEY,
-        },
-    )
-    try:
+    def _send_with_from(from_address: str) -> None:
+        payload = {
+            "from": {"address": from_address},
+            "to": [{"address": recipient_email}],
+            "subject": subject,
+            "text": body,
+        }
+        raw = json.dumps(payload).encode("utf-8")
+        req = urllib_request.Request(
+            MAILEROO_API_URL,
+            data=raw,
+            method="POST",
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {MAILEROO_API_KEY}",
+                "X-API-Key": MAILEROO_API_KEY,
+            },
+        )
         with urllib_request.urlopen(req, timeout=8) as resp:
             status = getattr(resp, "status", None) or resp.getcode()
             if status < 200 or status >= 300:
                 body_text = resp.read().decode("utf-8", errors="ignore")
                 raise RuntimeError(f"Maileroo API non-2xx status {status}: {body_text}")
+
+    preferred_from = SMTP_FROM_EMAIL or SMTP_USER
+    try:
+        _send_with_from(preferred_from)
+        return
     except HTTPError as exc:
         details = exc.read().decode("utf-8", errors="ignore")
+        if "not associated with this sending key" in details.lower() and preferred_from != SMTP_USER:
+            _send_with_from(SMTP_USER)
+            return
         raise RuntimeError(f"Maileroo API HTTPError {exc.code}: {details}") from exc
     except URLError as exc:
         raise RuntimeError(f"Maileroo API URLError: {exc}") from exc
