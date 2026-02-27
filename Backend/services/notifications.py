@@ -44,6 +44,7 @@ def create_notification(
     body: str,
     has_action: bool = True,
     dedupe_window_minutes: int | None = 2,
+    metadata: dict | None = None,
 ) -> Notification:
     if dedupe_window_minutes and dedupe_window_minutes > 0:
         cutoff = datetime.utcnow() - timedelta(minutes=dedupe_window_minutes)
@@ -66,6 +67,7 @@ def create_notification(
         type=type_,
         title=title,
         body=body,
+        metadata_json=json.dumps(metadata) if metadata else None,
         has_action=has_action,
     )
     db.add(notif)

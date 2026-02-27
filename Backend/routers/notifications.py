@@ -1,4 +1,5 @@
 import socket
+import json
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -219,6 +220,12 @@ def list_safety_events(
     for notif, user in rows:
         text = f"{notif.title} {notif.body}".lower()
         row_severity = "blocked" if "blocked" in text else ("warning" if "warning" in text else "info")
+        metadata = None
+        if getattr(notif, "metadata_json", None):
+            try:
+                metadata = json.loads(notif.metadata_json)
+            except Exception:
+                metadata = None
         out.append(
             {
                 "id": notif.id,
@@ -231,6 +238,7 @@ def list_safety_events(
                 "is_read": notif.is_read,
                 "created_at": notif.created_at,
                 "severity": row_severity,
+                "metadata": metadata,
             }
         )
     return out

@@ -40,7 +40,13 @@ LANGFUSE TRACING:
 
 import time
 import os
+import json
+import base64
+import mimetypes
+from urllib import request as urllib_request
+from urllib.error import URLError, HTTPError
 from langfuse.decorators import observe, langfuse_context
+from config import GEMINI_API_KEY, GEMINI_MODEL
 from database import SessionLocal
 from models.medicine import Medicine
 from saftery_policies_agents.state import AgentState, SafetyCheckResult
@@ -234,13 +240,16 @@ def _evaluate_rules(
 
     # RULE 1b: Prescription file must look valid and clear (extension/path sanity).
     if med.rx_required and rx_file:
-        rx = str(rx_file).strip().lower()
+        rx = str(rx_file).strip()
+        rx_l = rx.lower()
         allowed_ext = {".jpg", ".jpeg", ".png", ".pdf", ".webp"}
-        ext = os.path.splitext(rx)[1]
-        if ("/uploads/prescriptions/" not in rx) or (ext not in allowed_ext):
+        ext = os.path.splitext(rx_l)[1]
+        is_cloudinary = rx_l.startswith("https://res.cloudinary.com/")
+        is_local_upload = "/uploads/prescriptions/" in rx_l
+        if (ext not in allowed_ext) or (not is_cloudinary and not is_local_upload):
             reasoning = (
                 f"Medicine '{name}' requires Rx. Uploaded file '{rx_file}' failed validation "
-                f"(expected prescriptions path + allowed extension). DECISION: BLOCK."
+                f"(expected Cloudinary URL or /uploads/prescriptions path + allowed extension). DECISION: BLOCK."
             )
             _langfuse_output({"rule": "prescription_file_invalid", "status": "BLOCKED", "reasoning": reasoning})
             return SafetyCheckResult(
@@ -249,6 +258,19 @@ def _evaluate_rules(
                 status="blocked",
                 rule="prescription_file_invalid",
                 message=f"{name}: uploaded prescription is invalid or unclear. Please upload a clear prescription image/PDF.",
+            )
+        ocr_decision = _verify_prescription_with_gemini_ocr(name, rx)
+        if not ocr_decision["ok"]:
+            return SafetyCheckResult(
+                medicine_id=med.id,
+                medicine_name=name,
+                status="blocked",
+                rule="prescription_ocr_rejected",
+                message=f"{name}: {ocr_decision['reason']}",
+                detail={
+                    "confidence": ocr_decision.get("confidence"),
+                    "indicators": ocr_decision.get("indicators", {}),
+                },
             )
 
     # ────────────────────────────────────────────────────
@@ -435,6 +457,143 @@ def _evaluate_interactions(matched: list[dict], med_map: dict[int, Medicine]) ->
             )
         )
     return results
+
+
+@observe(name="safety_prescription_ocr")
+def _verify_prescription_with_gemini_ocr(medicine_name: str, rx_file: str) -> dict:
+    """
+    Strict OCR check:
+      - must be a real prescription-like document
+      - text/handwriting should be readable enough
+    """
+    if not GEMINI_API_KEY:
+        return {
+            "ok": False,
+            "reason": "Prescription AI verification is unavailable. Please try again.",
+            "confidence": 0.0,
+            "indicators": {},
+        }
+
+    try:
+        file_bytes, mime_type = _load_prescription_bytes(rx_file)
+    except Exception as exc:
+        return {"ok": False, "reason": f"Unable to open prescription file for AI verification: {exc}", "confidence": 0.0, "indicators": {}}
+
+    prompt = (
+        "You are a strict medical safety OCR checker.\n"
+        "Check if this file is a real doctor's prescription and readable enough for safe dispensing.\n"
+        "Return ONLY valid JSON (no markdown) with keys:\n"
+        "is_prescription (bool), is_clear (bool), doctor_present (bool), "
+        "medicine_or_dosage_present (bool), confidence (number 0 to 1), reason (string).\n"
+        f"Target medicine context: {medicine_name}\n"
+    )
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {"text": prompt},
+                    {"inline_data": {"mime_type": mime_type, "data": base64.b64encode(file_bytes).decode("utf-8")}},
+                ]
+            }
+        ],
+        "generationConfig": {"temperature": 0.0},
+    }
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
+    req = urllib_request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib_request.urlopen(req, timeout=20) as resp:
+            raw = resp.read().decode("utf-8", errors="ignore")
+    except HTTPError as exc:
+        details = exc.read().decode("utf-8", errors="ignore")
+        return {"ok": False, "reason": f"Prescription AI verification failed ({exc.code}): {details[:180]}", "confidence": 0.0, "indicators": {}}
+    except URLError as exc:
+        return {"ok": False, "reason": f"Prescription AI network error: {exc}", "confidence": 0.0, "indicators": {}}
+    except Exception as exc:
+        return {"ok": False, "reason": f"Prescription AI error: {exc}", "confidence": 0.0, "indicators": {}}
+
+    try:
+        parsed = json.loads(raw)
+        text = (
+            parsed.get("candidates", [{}])[0]
+            .get("content", {})
+            .get("parts", [{}])[0]
+            .get("text", "")
+            .strip()
+        )
+        text = text.replace("```json", "").replace("```", "").strip()
+        result = json.loads(text)
+    except Exception:
+        return {
+            "ok": False,
+            "reason": "Prescription AI returned unreadable output. Please upload a clearer prescription.",
+            "confidence": 0.0,
+            "indicators": {},
+        }
+
+    is_prescription = bool(result.get("is_prescription"))
+    is_clear = bool(result.get("is_clear"))
+    doctor_present = bool(result.get("doctor_present"))
+    med_or_dosage = bool(result.get("medicine_or_dosage_present"))
+    confidence = float(result.get("confidence", 0) or 0)
+    reason = str(result.get("reason", "Prescription failed strict OCR checks")).strip()
+
+    _langfuse_output(
+        {
+            "rule": "prescription_ocr_check",
+            "medicine": medicine_name,
+            "is_prescription": is_prescription,
+            "is_clear": is_clear,
+            "doctor_present": doctor_present,
+            "medicine_or_dosage_present": med_or_dosage,
+            "confidence": confidence,
+            "reason": reason,
+        }
+    )
+    passed = is_prescription and is_clear and doctor_present and med_or_dosage and confidence >= 0.55
+    indicators = {
+        "is_prescription": is_prescription,
+        "is_clear": is_clear,
+        "doctor_present": doctor_present,
+        "medicine_or_dosage_present": med_or_dosage,
+    }
+    if not passed:
+        return {
+            "ok": False,
+            "reason": reason or "Prescription is unclear or not valid.",
+            "confidence": confidence,
+            "indicators": indicators,
+        }
+    return {"ok": True, "reason": "Prescription verified by OCR", "confidence": confidence, "indicators": indicators}
+
+
+def _load_prescription_bytes(rx_file: str) -> tuple[bytes, str]:
+    rx = str(rx_file).strip()
+    if rx.lower().startswith("http://") or rx.lower().startswith("https://"):
+        with urllib_request.urlopen(rx, timeout=12) as resp:
+            content = resp.read()
+            content_type = resp.headers.get("Content-Type", "") or ""
+        mime_type = content_type.split(";")[0].strip() or _guess_mime(rx)
+        return content, mime_type
+
+    if rx.startswith("/uploads/prescriptions/"):
+        uploads_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "uploads"))
+        local_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", rx.lstrip("/")))
+        if not local_path.startswith(uploads_root):
+            raise RuntimeError("invalid local prescription path")
+        with open(local_path, "rb") as fh:
+            content = fh.read()
+        return content, _guess_mime(local_path)
+    raise RuntimeError("unsupported prescription path")
+
+
+def _guess_mime(path: str) -> str:
+    guessed, _ = mimetypes.guess_type(path)
+    return guessed or "application/octet-stream"
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

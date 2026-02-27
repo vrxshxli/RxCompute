@@ -122,6 +122,15 @@ def migrate():
                 print("  ✓ Added column: medicines.image_url")
             else:
                 print("  · Column already exists: medicines.image_url")
+
+            # 6. Add missing columns to 'notifications' table
+            notif_cols = get_existing_columns(conn, "notifications")
+            if "metadata_json" not in notif_cols:
+                conn.execute(text("ALTER TABLE notifications ADD COLUMN metadata_json TEXT"))
+                conn.commit()
+                print("  ✓ Added column: notifications.metadata_json")
+            else:
+                print("  · Column already exists: notifications.metadata_json")
         finally:
             if lock_acquired:
                 try:

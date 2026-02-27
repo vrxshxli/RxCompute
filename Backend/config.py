@@ -54,3 +54,12 @@ JOB_RUN_KEY = os.getenv("JOB_RUN_KEY", "")
 WEBHOOK_TARGET_URL = os.getenv("WEBHOOK_TARGET_URL", "")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
 WEBHOOK_TIMEOUT_SECONDS = int(os.getenv("WEBHOOK_TIMEOUT_SECONDS", "8"))
+
+# Cloudinary (prescription image storage)
+CLOUDINARY_CLOUD_NAME = os.getenv("CLOUDINARY_CLOUD_NAME", "")
+CLOUDINARY_UPLOAD_PRESET = os.getenv("CLOUDINARY_UPLOAD_PRESET", "")
+CLOUDINARY_FOLDER = os.getenv("CLOUDINARY_FOLDER", "rxcompute/prescriptions")
+
+# Gemini (safety OCR validation)
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "AIzaSyBbaJoIV5H2IvsMybbgA8FeysrCqHFvmVc")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-pro-latest")

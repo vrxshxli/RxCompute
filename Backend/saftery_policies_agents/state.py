@@ -5,7 +5,7 @@ Each agent reads the fields it needs, does its work, and writes its output
 back. The state accumulates results as it moves through the chain.
 """
 
-from typing import TypedDict, Literal
+from typing import TypedDict, Literal, Any, NotRequired
 
 
 class SafetyCheckResult(TypedDict):
@@ -15,6 +15,7 @@ class SafetyCheckResult(TypedDict):
     status: Literal["approved", "blocked", "warning"]
     rule: str          # which rule triggered (e.g. "prescription_required")
     message: str       # human-readable explanation
+    detail: NotRequired[dict[str, Any]]
 
 
 class AgentState(TypedDict):

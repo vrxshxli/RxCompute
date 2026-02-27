@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Enum as SAEnum
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Enum as SAEnum, Text
 from sqlalchemy.sql import func
 import enum
 
@@ -20,6 +20,7 @@ class Notification(Base):
     type = Column(SAEnum(NotificationType), default=NotificationType.system)
     title = Column(String(200), nullable=False)
     body = Column(String(500), nullable=False)
+    metadata_json = Column(Text, nullable=True)
     is_read = Column(Boolean, default=False)
     has_action = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

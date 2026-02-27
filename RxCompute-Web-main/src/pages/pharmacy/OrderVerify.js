@@ -56,6 +56,11 @@ export default function PharmacyVerify() {
     });
     await load();
   };
+  const resolveFileUrl = (path) => {
+    if (!path) return "";
+    if (/^https?:\/\//i.test(path)) return path;
+    return `${apiBase}${path}`;
+  };
 
   if (!o) return <div><PageHeader title="Order Verification" subtitle="No orders"/></div>;
   return (<div><PageHeader title="Order Verification" subtitle={o.order_uid}/>
@@ -67,7 +72,7 @@ export default function PharmacyVerify() {
   <div style={{display:"grid",gridTemplateColumns:"1.4fr 1fr",gap:16}}>
     <div>
       <div style={{background:T.white,border:"1px solid "+T.gray200,borderRadius:10,padding:20,marginBottom:16}}><div style={{fontWeight:600,fontSize:14,color:T.gray900,marginBottom:12}}>Patient</div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>{[["ID",`U-${o.user_id}`],["Name",p?.name || `User #${o.user_id}`],["Email",p?.email || "-"],["Role",p?.role || "user"]].map(([l,v])=><div key={l}><div style={{fontSize:11,color:T.gray400,textTransform:"uppercase"}}>{l}</div><div style={{fontSize:13,color:T.gray800,fontWeight:500}}>{v}</div></div>)}</div></div>
-      <div style={{background:T.white,border:"1px solid "+T.gray200,borderRadius:10,padding:20}}><div style={{fontWeight:600,fontSize:14,color:T.gray900,marginBottom:12}}>Items</div>{(o.items || []).map((it,i)=><div key={i} style={{display:"flex",justifyContent:"space-between",padding:"10px 0",borderBottom:i<(o.items || []).length-1?"1px solid "+T.gray100:"none"}}><div><div style={{fontWeight:500,color:T.gray800}}>{it.name}</div><div style={{fontSize:11,color:T.gray400}}>Qty: {it.quantity} · ₹ {Number(it.price || 0).toFixed(2)} {it.rx_required ? "· Rx" : ""}</div></div></div>)}<div style={{display:"flex",justifyContent:"flex-end",paddingTop:12,fontSize:15,fontWeight:700}}>₹ {Number(o.total || 0).toFixed(2)}</div></div>
+      <div style={{background:T.white,border:"1px solid "+T.gray200,borderRadius:10,padding:20}}><div style={{fontWeight:600,fontSize:14,color:T.gray900,marginBottom:12}}>Items</div>{(o.items || []).map((it,i)=><div key={i} style={{display:"flex",justifyContent:"space-between",padding:"10px 0",borderBottom:i<(o.items || []).length-1?"1px solid "+T.gray100:"none"}}><div><div style={{fontWeight:500,color:T.gray800}}>{it.name}</div><div style={{fontSize:11,color:T.gray400}}>Qty: {it.quantity} · ₹ {Number(it.price || 0).toFixed(2)} {it.rx_required ? "· Rx" : ""}</div>{it.prescription_file ? <div style={{marginTop:6}}><a href={resolveFileUrl(it.prescription_file)} target="_blank" rel="noreferrer" style={{fontSize:12,color:T.blue}}>View Prescription</a></div> : null}</div>{it.prescription_file && /\.(png|jpe?g|webp)$/i.test(it.prescription_file) ? <img src={resolveFileUrl(it.prescription_file)} alt="Prescription" style={{width:80,height:80,objectFit:"cover",borderRadius:8,border:`1px solid ${T.gray200}`}} /> : null}</div>)}<div style={{display:"flex",justifyContent:"flex-end",paddingTop:12,fontSize:15,fontWeight:700}}>₹ {Number(o.total || 0).toFixed(2)}</div></div>
     </div>
     <div>
       <div style={{background:T.navy900,borderRadius:10,padding:20,color:T.gray300,marginBottom:16}}><div style={{fontWeight:600,fontSize:14,color:T.white,marginBottom:16,display:"flex",alignItems:"center",gap:8}}><Zap size={16} color={T.yellow}/>AI Analysis</div>{[{i:"OK",t:`Prescription: ${((o.items || []).some(it=>it.rx_required)) ? "required" : "not required"}`,c:T.green},{i:"OK",t:`Items: ${(o.items || []).length}`,c:T.green},{i:"OK",t:`Current status: ${o.status}`,c:T.green},{i:">>",t:"Recommendation: APPROVE",c:T.blue}].map((x,j)=><div key={j} style={{display:"flex",gap:10,marginBottom:12,fontSize:13}}><span style={{color:x.c,fontWeight:700}}>{x.i}</span><span style={{color:x.c}}>{x.t}</span></div>)}<Btn variant="ghost" size="sm" style={{color:T.blue,marginTop:8}}><ExternalLink size={12}/>Langfuse</Btn></div>

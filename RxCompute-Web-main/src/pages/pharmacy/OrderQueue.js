@@ -94,10 +94,26 @@ export default function PharmacyOrderQueue() {
       setSavingId(null);
     }
   };
+  const resolveFileUrl = (path) => {
+    if (!path) return "";
+    if (/^https?:\/\//i.test(path)) return path;
+    return `${apiBase}${path}`;
+  };
   const OC=({order,type})=><div style={{border:"1px solid "+T.gray200,borderLeft:"3px solid "+(type==="urgent"?T.red:type==="normal"?T.blue:T.gray400),borderRadius:8,padding:14}}>
     <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}><span style={{fontFamily:"monospace",fontSize:11,color:T.gray500}}>{order.order_id}</span></div>
     <div style={{fontSize:13,color:T.gray700,marginBottom:4}}>{order.patient_name}</div>
     <div style={{fontSize:12,color:T.gray500,marginBottom:8}}>{order.items?.map(x=>x.name.split(" ").slice(0,3).join(" ")+" x"+x.quantity).join(", ")}</div>
+    {order.items?.some((x) => !!x.prescription_file) ? (
+      <div style={{fontSize:11,marginBottom:8}}>
+        {order.items
+          .filter((x) => !!x.prescription_file)
+          .map((x, idx) => (
+            <a key={`${order.id}-rx-${idx}`} href={resolveFileUrl(x.prescription_file)} target="_blank" rel="noreferrer" style={{color:T.blue,marginRight:8}}>
+              Rx file
+            </a>
+          ))}
+      </div>
+    ) : null}
     <div style={{fontSize:14,fontWeight:700,color:T.blue,marginBottom:8}}>₹{order.total_price.toFixed(2)}</div>
     {type==="urgent"&&<div style={{fontSize:11,color:T.red,fontWeight:500,marginBottom:8}}>Prescription Required</div>}
     {type==="normal"&&<div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8}}><span style={{fontSize:11,color:T.gray500}}>AI:</span><div style={{width:60,height:4,borderRadius:2,background:T.gray100,overflow:"hidden"}}><div style={{height:"100%",width:"96%",borderRadius:2,background:T.green}}/></div><span style={{fontSize:11,fontWeight:600,color:T.green}}>96%</span></div>}

@@ -44,6 +44,151 @@ def _broadcast_safety_alert(db: Session, title: str, body: str, actor: User | No
     db.commit()
 
 
+def _build_safety_trace_metadata(order: Order | None, safety: dict, phase: str) -> dict:
+    results = safety.get("safety_results", []) or []
+    ocr_details = []
+    for row in results:
+        if not isinstance(row, dict):
+            continue
+        rule = str(row.get("rule", ""))
+        if "prescription_ocr" not in rule:
+            continue
+        detail = row.get("detail") if isinstance(row.get("detail"), dict) else {}
+        ocr_details.append(
+            {
+                "medicine_id": row.get("medicine_id"),
+                "medicine_name": row.get("medicine_name"),
+                "rule": rule,
+                "status": row.get("status"),
+                "reason": row.get("message"),
+                "confidence": detail.get("confidence"),
+                "indicators": detail.get("indicators"),
+            }
+        )
+    return {
+        "phase": phase,
+        "order_id": getattr(order, "id", None) if order else None,
+        "order_uid": getattr(order, "order_uid", None) if order else None,
+        "has_blocks": bool(safety.get("has_blocks")),
+        "has_warnings": bool(safety.get("has_warnings")),
+        "safety_summary": safety.get("safety_summary"),
+        "ocr_details": ocr_details,
+        "safety_results": results,
+    }
+
+
+def _auto_review_pending_for_pharmacy(db: Session, pharmacy_user: User) -> None:
+    pending_orders = (
+        db.query(Order)
+        .filter(Order.status == OrderStatus.pending)
+        .order_by(Order.created_at.asc())
+        .limit(100)
+        .all()
+    )
+    if not pending_orders:
+        return
+    changed = False
+    for order in pending_orders:
+        payload = [
+            {
+                "medicine_id": it.medicine_id,
+                "name": it.name,
+                "quantity": it.quantity,
+                "dosage_instruction": it.dosage_instruction,
+                "strips_count": it.strips_count,
+                "prescription_file": it.prescription_file,
+            }
+            for it in order.items
+        ]
+        safety = process_with_safety(
+            user_id=order.user_id,
+            matched_medicines=payload,
+            user_message="Pharmacy auto-review pending order",
+        )
+        reason = (safety.get("safety_summary") or "").strip() or "Rejected by safety agent"
+        now = datetime.utcnow()
+        order_owner = db.query(User).filter(User.id == order.user_id).first()
+
+        if safety.get("has_blocks"):
+            trace_meta = _build_safety_trace_metadata(order, safety, "pharmacy_auto_review")
+            order.status = OrderStatus.cancelled
+            order.last_status_updated_by_role = pharmacy_user.role
+            order.last_status_updated_by_name = pharmacy_user.name or pharmacy_user.email or f"User #{pharmacy_user.id}"
+            order.last_status_updated_at = now
+            create_notification(
+                db,
+                order.user_id,
+                NotificationType.safety,
+                "Safety Agent Rejected Order",
+                reason,
+                has_action=True,
+                metadata=trace_meta,
+            )
+            if order_owner:
+                run_in_background(send_push_to_token, order_owner.push_token, "Safety Agent Rejected Order", reason, order_owner.id)
+                run_in_background(send_safety_rejection_email, order_owner.email, order.order_uid, reason)
+            changed = True
+            continue
+
+        # Auto-approve if no blocking safety issues.
+        med_ids = [it.medicine_id for it in order.items]
+        med_rows = db.query(Medicine).filter(Medicine.id.in_(med_ids)).all()
+        med_map = {m.id: m for m in med_rows}
+        stock_ok = True
+        stock_reason = ""
+        for it in order.items:
+            med = med_map.get(it.medicine_id)
+            if not med:
+                stock_ok = False
+                stock_reason = f"Medicine id {it.medicine_id} not found during auto-review"
+                break
+            units_to_reduce = it.strips_count if (it.strips_count or 0) > 0 else max(it.quantity, 1)
+            if (med.stock or 0) < units_to_reduce:
+                stock_ok = False
+                stock_reason = f"Insufficient stock for {med.name}. Available {med.stock}, required {units_to_reduce}"
+                break
+        if not stock_ok:
+            order.status = OrderStatus.cancelled
+            order.last_status_updated_by_role = pharmacy_user.role
+            order.last_status_updated_by_name = pharmacy_user.name or pharmacy_user.email or f"User #{pharmacy_user.id}"
+            order.last_status_updated_at = now
+            create_notification(db, order.user_id, NotificationType.safety, "Order Rejected During Auto Review", stock_reason, has_action=True)
+            if order_owner:
+                run_in_background(send_push_to_token, order_owner.push_token, "Order Rejected During Auto Review", stock_reason, order_owner.id)
+                run_in_background(send_safety_rejection_email, order_owner.email, order.order_uid, stock_reason)
+            changed = True
+            continue
+
+        for it in order.items:
+            med = med_map[it.medicine_id]
+            units_to_reduce = it.strips_count if (it.strips_count or 0) > 0 else max(it.quantity, 1)
+            med.stock = (med.stock or 0) - units_to_reduce
+
+        order.status = OrderStatus.verified
+        order.last_status_updated_by_role = pharmacy_user.role
+        order.last_status_updated_by_name = pharmacy_user.name or pharmacy_user.email or f"User #{pharmacy_user.id}"
+        order.last_status_updated_at = now
+        order.pharmacy_approved_by_name = pharmacy_user.name or pharmacy_user.email or f"User #{pharmacy_user.id}"
+        order.pharmacy_approved_at = now
+        if not order.pharmacy or str(order.pharmacy).strip().lower() in {"none", "null", "-"}:
+            node_id = f"PH-U{pharmacy_user.id:03d}"
+            store = db.query(PharmacyStore).filter(PharmacyStore.node_id == node_id).first()
+            order.pharmacy = store.node_id if store else node_id
+        create_notification(
+            db,
+            order.user_id,
+            NotificationType.order,
+            "Order Auto Approved",
+            f"{order.order_uid} verified by pharmacy safety agent.",
+            has_action=True,
+        )
+        if order_owner:
+            run_in_background(send_push_to_token, order_owner.push_token, "Order Auto Approved", f"{order.order_uid} verified by pharmacy.", order_owner.id)
+        changed = True
+    if changed:
+        db.commit()
+
+
 @router.get("/", response_model=list[OrderOut])
 def list_orders(
     current_user: User = Depends(get_current_user),
@@ -52,6 +197,8 @@ def list_orders(
     """List all orders for the current user."""
     if current_user.role == "warehouse":
         raise HTTPException(status_code=403, detail="Warehouse does not have access to customer orders")
+    if current_user.role == "pharmacy_store":
+        _auto_review_pending_for_pharmacy(db, current_user)
     if current_user.role in STAFF_ROLES:
         return db.query(Order).order_by(Order.created_at.desc()).all()
     return (
@@ -103,11 +250,22 @@ def create_order(
         matched_medicines=safety_payload,
         user_message="Order safety check before create_order",
     )
+    trace_meta = _build_safety_trace_metadata(None, safety, "order_create")
     safety_summary = (safety.get("safety_summary") or "").strip()
     if safety.get("has_blocks"):
         title = "Safety Alert: Order Blocked"
         body = safety_summary or "Order blocked by safety policy checks."
         _broadcast_safety_alert(db, title, body, current_user)
+        create_notification(
+            db,
+            current_user.id,
+            NotificationType.safety,
+            "Safety Agent Trace",
+            body,
+            has_action=True,
+            metadata=trace_meta,
+        )
+        db.commit()
         raise HTTPException(
             status_code=400,
             detail={
@@ -120,6 +278,16 @@ def create_order(
         title = "Safety Warning: Review Needed"
         body = safety_summary or "Order has safety warnings. Pharmacist review recommended."
         _broadcast_safety_alert(db, title, body, current_user)
+        create_notification(
+            db,
+            current_user.id,
+            NotificationType.safety,
+            "Safety Agent Trace",
+            body,
+            has_action=True,
+            metadata=trace_meta,
+        )
+        db.commit()
 
     med_ids = [item.medicine_id for item in data.items]
     meds = (
@@ -268,6 +436,7 @@ def update_order_status(
                 matched_medicines=verify_payload,
                 user_message="Pharmacy verification safety check",
             )
+            verify_trace_meta = _build_safety_trace_metadata(order, safety_verify, "pharmacy_manual_verify")
             if safety_verify.get("has_blocks"):
                 auto_reject_reason = safety_verify.get("safety_summary", "") or "Rejected by safety agent checks"
                 new_status = OrderStatus.cancelled
@@ -342,6 +511,7 @@ def update_order_status(
                 auto_reject_reason,
                 has_action=True,
                 dedupe_window_minutes=1,
+                metadata=verify_trace_meta if "verify_trace_meta" in locals() else None,
             )
         db.commit()
         if order_owner:
