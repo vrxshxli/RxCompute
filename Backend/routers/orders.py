@@ -14,9 +14,8 @@ from schemas.order import OrderCreate, OrderOut, OrderStatusUpdate
 from services.notifications import (
     create_notification,
     run_in_background,
-    send_order_email,
-    send_push_if_available,
-    send_staff_order_email,
+    send_push_to_token,
+    send_order_email_snapshot,
 )
 from services.webhooks import dispatch_webhook
 
@@ -127,13 +126,21 @@ def create_order(
 
     db.commit()
     db.refresh(order)
+    order_snapshot = {
+        "order_uid": order.order_uid,
+        "status": order.status.value if hasattr(order.status, "value") else str(order.status),
+        "payment_method": order.payment_method,
+        "total": order.total,
+        "pharmacy": order.pharmacy,
+        "items": [{"name": it.name, "quantity": it.quantity, "price": it.price} for it in order.items],
+    }
 
     title = "Order Placed"
     body = f"{order.order_uid} placed successfully. Total {order.total:.2f}"
     create_notification(db, current_user.id, NotificationType.order, title, body, has_action=True)
     db.commit()
-    run_in_background(send_push_if_available, current_user, title, body)
-    run_in_background(send_order_email, current_user, order)
+    run_in_background(send_push_to_token, current_user.push_token, title, body, current_user.id)
+    run_in_background(send_order_email_snapshot, current_user.email, order_snapshot, "RxCompute Order")
     staff_users = db.query(User).filter(User.role.in_(["admin", "pharmacy_store"])).all()
     staff_title = "New Order Received"
     staff_body = f"{order.order_uid} placed by user #{order.user_id}. Total {order.total:.2f}"
@@ -146,8 +153,8 @@ def create_order(
             staff_body,
             has_action=True,
         )
-        run_in_background(send_push_if_available, staff, staff_title, staff_body)
-        run_in_background(send_staff_order_email, staff, order)
+        run_in_background(send_push_to_token, staff.push_token, staff_title, staff_body, staff.id)
+        run_in_background(send_order_email_snapshot, staff.email, order_snapshot, "RxCompute New Order")
     db.commit()
     dispatch_webhook(
         db,
@@ -252,8 +259,16 @@ def update_order_status(
         create_notification(db, order.user_id, NotificationType.order, title, body, has_action=True)
         db.commit()
         if order_owner:
-            run_in_background(send_push_if_available, order_owner, title, body)
-            run_in_background(send_order_email, order_owner, order)
+            status_snapshot = {
+                "order_uid": order.order_uid,
+                "status": order.status.value if hasattr(order.status, "value") else str(order.status),
+                "payment_method": order.payment_method,
+                "total": order.total,
+                "pharmacy": order.pharmacy,
+                "items": [{"name": it.name, "quantity": it.quantity, "price": it.price} for it in order.items],
+            }
+            run_in_background(send_push_to_token, order_owner.push_token, title, body, order_owner.id)
+            run_in_background(send_order_email_snapshot, order_owner.email, status_snapshot, "RxCompute Order")
     dispatch_webhook(
         db,
         event_type="order_status_updated",

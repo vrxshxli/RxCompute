@@ -64,16 +64,22 @@ def send_push_if_available(user: User | None, title: str, body: str) -> None:
     if not user or not user.push_token:
         print("Push skipped: no user or push token")
         return
+    send_push_to_token(user.push_token, title, body, user.id if user else None)
+
+
+def send_push_to_token(push_token: str | None, title: str, body: str, user_id: int | None = None) -> None:
+    if not push_token:
+        print("Push skipped: no user or push token")
+        return
     try:
         if not firebase_admin._apps:
             print("Push skipped: Firebase Admin is not initialized")
             return
         msg = messaging.Message(
-            token=user.push_token,
+            token=push_token,
             notification=messaging.Notification(title=title, body=body),
             android=messaging.AndroidConfig(
-                notification_channel_id="rxcompute_alerts",
-                notification=messaging.AndroidNotification(sound="rx_tune"),
+                notification=messaging.AndroidNotification(sound="rx_tune", channel_id="rxcompute_alerts"),
             ),
             apns=messaging.APNSConfig(
                 payload=messaging.APNSPayload(
@@ -83,7 +89,7 @@ def send_push_if_available(user: User | None, title: str, body: str) -> None:
         )
         messaging.send(msg)
     except Exception as exc:
-        print(f"Push send failed for user {user.id if user else 'n/a'}: {exc}")
+        print(f"Push send failed for user {user_id if user_id else 'n/a'}: {exc}")
         traceback.print_exc()
         # Push failures should not break business flow.
         return
@@ -164,6 +170,31 @@ def send_staff_order_email(user: User | None, order: Order) -> None:
         _send_email(recipient_email, f"RxCompute New Order {order.order_uid}", text)
     except Exception as exc:
         print(f"Staff order email send failed to {recipient_email}: {exc}")
+        traceback.print_exc()
+
+
+def send_order_email_snapshot(recipient_email: str | None, order_data: dict, subject_prefix: str = "RxCompute Order") -> None:
+    if not recipient_email:
+        recipient_email = SMTP_FALLBACK_TO_EMAIL
+    if not recipient_email:
+        print("Email skipped: recipient missing")
+        return
+    if not SMTP_HOST or not SMTP_USER or not SMTP_PASSWORD:
+        return
+    items = order_data.get("items", [])
+    items_text = "\n".join([f"- {it.get('name', '-')} x{it.get('quantity', 0)} ({float(it.get('price', 0)):.2f})" for it in items]) or "-"
+    text = (
+        f"Order ID: {order_data.get('order_uid', '-')}\n"
+        f"Status: {order_data.get('status', '-')}\n"
+        f"Assigned pharmacy: {order_data.get('pharmacy', '-')}\n"
+        f"Payment: {order_data.get('payment_method', '-')}\n"
+        f"Total: {float(order_data.get('total', 0)):.2f}\n\n"
+        f"Items:\n{items_text}\n"
+    )
+    try:
+        _send_email(recipient_email, f"{subject_prefix} {order_data.get('order_uid', '-')}", text)
+    except Exception as exc:
+        print(f"Snapshot email send failed to {recipient_email}: {exc}")
         traceback.print_exc()
 
 

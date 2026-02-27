@@ -237,7 +237,7 @@ export default function App() {
   return (
     <AuthProvider>
       <NotificationProvider>
-        <AppRoutes />
+      <AppRoutes />
       </NotificationProvider>
     </AuthProvider>
   );

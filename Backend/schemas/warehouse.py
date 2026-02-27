@@ -57,3 +57,14 @@ class WarehouseMedicineCreate(BaseModel):
 
 class WarehouseMedicineBulkCreate(BaseModel):
     medicines: list[WarehouseMedicineCreate]
+
+
+class WarehouseMedicineUpdate(BaseModel):
+    name: str | None = None
+    pzn: str | None = None
+    price: float | None = None
+    package: str | None = None
+    rx_required: bool | None = None
+    description: str | None = None
+    image_url: str | None = None
+    warehouse_stock: int | None = None

@@ -16,6 +16,8 @@ export default function AdminInventory() {
   const [sendingWarehouse, setSendingWarehouse] = useState(false);
   const [addError, setAddError] = useState("");
   const [warehouseMsg, setWarehouseMsg] = useState("");
+  const [editId, setEditId] = useState(null);
+  const [editForm, setEditForm] = useState({ name: "", pzn: "", price: "", stock: "", package: "", description: "", rx_required: false });
   const [form, setForm] = useState({
     name: "",
     pzn: "",
@@ -141,6 +143,70 @@ export default function AdminInventory() {
     }
   };
 
+  const openEdit = (m) => {
+    setEditId(m.id);
+    setEditForm({
+      name: m.name || "",
+      pzn: m.pzn || "",
+      price: String(m.price ?? ""),
+      stock: String(m.stock ?? 0),
+      package: m.package_size === "-" ? "" : (m.package_size || ""),
+      description: m.category === "-" ? "" : (m.category || ""),
+      rx_required: !!m.rx,
+    });
+  };
+
+  const saveEdit = async () => {
+    if (!token || !editId) return;
+    setAddError("");
+    try {
+      const res = await fetch(`${apiBase}/medicines/${editId}`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: editForm.name.trim() || null,
+          price: editForm.price === "" ? null : Number(editForm.price),
+          stock: editForm.stock === "" ? null : Number(editForm.stock),
+          package: editForm.package.trim() || null,
+          description: editForm.description.trim() || null,
+          rx_required: !!editForm.rx_required,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setAddError(data?.detail || "Unable to update medicine");
+        return;
+      }
+      setEditId(null);
+      await loadMedicines();
+    } catch (_) {
+      setAddError("Network error while updating medicine");
+    }
+  };
+
+  const deleteMedicine = async (id) => {
+    if (!token) return;
+    if (!window.confirm("Delete this medicine?")) return;
+    setAddError("");
+    try {
+      const res = await fetch(`${apiBase}/medicines/${id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setAddError(data?.detail || "Unable to delete medicine");
+        return;
+      }
+      await loadMedicines();
+    } catch (_) {
+      setAddError("Network error while deleting medicine");
+    }
+  };
+
   const filtered = useMemo(() => {
     let d = medicines;
     if (search) d = d.filter(m => m.name.toLowerCase().includes(search.toLowerCase()));
@@ -185,6 +251,27 @@ export default function AdminInventory() {
         {warehouseMsg ? <div style={{ marginTop:8, color:warehouseMsg==="Sent to warehouse"?T.green:T.red, fontSize:12 }}>{warehouseMsg}</div> : null}
       </div>
     )}
+    {editId ? (
+      <div style={{ background:T.white, border:"1px solid "+T.gray200, borderRadius:12, padding:14, marginBottom:12 }}>
+        <div style={{ fontSize:13, fontWeight:600, color:T.gray900, marginBottom:8 }}>Edit Medicine</div>
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(4, minmax(120px, 1fr))", gap:10 }}>
+          <input value={editForm.name} onChange={(e)=>setEditForm({...editForm, name:e.target.value})} placeholder="Medicine name" style={{ padding:"10px", border:`1px solid ${T.gray200}`, borderRadius:8 }} />
+          <input value={editForm.pzn} disabled placeholder="PZN" style={{ padding:"10px", border:`1px solid ${T.gray200}`, borderRadius:8, background:T.gray50 }} />
+          <input value={editForm.price} onChange={(e)=>setEditForm({...editForm, price:e.target.value})} placeholder="Price" type="number" style={{ padding:"10px", border:`1px solid ${T.gray200}`, borderRadius:8 }} />
+          <input value={editForm.stock} onChange={(e)=>setEditForm({...editForm, stock:e.target.value})} placeholder="Stock" type="number" style={{ padding:"10px", border:`1px solid ${T.gray200}`, borderRadius:8 }} />
+          <input value={editForm.package} onChange={(e)=>setEditForm({...editForm, package:e.target.value})} placeholder="Package size" style={{ padding:"10px", border:`1px solid ${T.gray200}`, borderRadius:8 }} />
+          <input value={editForm.description} onChange={(e)=>setEditForm({...editForm, description:e.target.value})} placeholder="Description" style={{ padding:"10px", border:`1px solid ${T.gray200}`, borderRadius:8, gridColumn:"span 2" }} />
+          <label style={{ display:"flex", alignItems:"center", gap:8, fontSize:12, color:T.gray700 }}>
+            <input type="checkbox" checked={editForm.rx_required} onChange={(e)=>setEditForm({...editForm, rx_required:e.target.checked})} />
+            Prescription required
+          </label>
+          <div style={{ display:"flex", gap:8 }}>
+            <Btn variant="primary" size="sm" onClick={saveEdit}>Save</Btn>
+            <Btn variant="secondary" size="sm" onClick={()=>setEditId(null)}>Cancel</Btn>
+          </div>
+        </div>
+      </div>
+    ) : null}
     <div style={{ display:"flex", gap:12, marginBottom:16, flexWrap:"wrap", alignItems:"center" }}>
       <SearchInput value={search} onChange={setSearch} placeholder="Search medicines..." />
       {["all","in","low","out","rx"].map(f => <button key={f} onClick={() => setFilter(f)} style={{ padding:"7px 14px", borderRadius:8, border:"1px solid "+(filter===f?T.blue:T.gray200), background:filter===f?T.blue+"08":T.white, color:filter===f?T.blue:T.gray600, fontSize:12, fontWeight:500, cursor:"pointer" }}>{f==="all"?"All":f==="in"?"In Stock":f==="low"?"Low":f==="out"?"Out":"Rx"}</button>)}
@@ -216,6 +303,10 @@ export default function AdminInventory() {
             <div style={{ display:"flex", justifyContent:"space-between", marginTop:8 }}>
               <span style={{ fontSize:11, color:T.gray400 }}>{m.package_size}</span>
               <span style={{ fontSize:11, color:T.gray400 }}>{m.category}</span>
+            </div>
+            <div style={{ display:"flex", gap:8, marginTop:10 }}>
+              <Btn variant="secondary" size="sm" onClick={() => openEdit(m)}>Edit</Btn>
+              <Btn variant="secondary" size="sm" style={{ color:T.red }} onClick={() => deleteMedicine(m.id)}>Delete</Btn>
             </div>
           </div>
         ))}

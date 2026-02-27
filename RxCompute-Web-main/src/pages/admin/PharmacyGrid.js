@@ -13,8 +13,8 @@ export default function AdminPharmacyGrid() {
     node_id: "",
     name: "",
     location: "",
-    load: "0",
-    stock_count: "0",
+    load: "",
+    stock_count: "",
     active: true,
   });
 
@@ -40,15 +40,19 @@ export default function AdminPharmacyGrid() {
     loadStores();
   }, [token, apiBase]);
 
-  const uniqueLocations = useMemo(
-    () => new Set(stores.map((s) => (s.location || "").trim().toLowerCase()).filter(Boolean)).size,
+  const realStores = useMemo(
+    () => stores.filter((s) => String(s.node_id || "").startsWith("PH-U")),
     [stores],
+  );
+  const uniqueLocations = useMemo(
+    () => new Set(realStores.map((s) => (s.location || "").trim().toLowerCase()).filter(Boolean)).size,
+    [realStores],
   );
   const virtualGrid = useMemo(
     () =>
       pharmacyUsers.map((u) => {
         const expectedNode = `PH-U${String(u.id).padStart(3, "0")}`;
-        const mappedStore = stores.find((s) => s.node_id === expectedNode);
+        const mappedStore = realStores.find((s) => s.node_id === expectedNode);
         return {
           userId: u.id,
           userName: (u.name || "").trim() || `Pharmacy User ${u.id}`,
@@ -57,7 +61,7 @@ export default function AdminPharmacyGrid() {
           mappedStore,
         };
       }),
-    [pharmacyUsers, stores],
+    [pharmacyUsers, realStores],
   );
 
   const saveStore = async (store) => {
@@ -113,16 +117,16 @@ export default function AdminPharmacyGrid() {
         setError(data?.detail || "Create failed");
         return;
       }
-      setNewStore({ node_id: "", name: "", location: "", load: "0", stock_count: "0", active: true });
+      setNewStore({ node_id: "", name: "", location: "", load: "", stock_count: "", active: true });
       await loadStores();
     } catch (_) {
       setError("Network error while creating store");
     }
   };
 
-  return (<div><PageHeader title="Virtual Pharmacy Grid" subtitle="Node health & routing with saved locations"/>
+  return (<div><PageHeader title="Virtual Pharmacy Grid" subtitle="Only real pharmacy dashboard mapped stores are shown"/>
   <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(180px, 1fr))",gap:12,marginBottom:16}}>
-    <StatCard icon={Building2} label="Pharmacy Stores" value={String(stores.length)} color={T.blue}/>
+    <StatCard icon={Building2} label="Mapped Stores" value={String(realStores.length)} color={T.blue}/>
     <StatCard icon={MapPin} label="Locations" value={String(uniqueLocations)} color={T.orange}/>
     <StatCard icon={Building2} label="Pharmacy Dashboard Users" value={String(pharmacyUsers.length)} color={T.green}/>
   </div>
@@ -142,17 +146,18 @@ export default function AdminPharmacyGrid() {
       <input value={newStore.node_id} onChange={(e)=>setNewStore({...newStore, node_id:e.target.value})} placeholder="Node ID" style={{padding:"8px",border:`1px solid ${T.gray200}`,borderRadius:8}} />
       <input value={newStore.name} onChange={(e)=>setNewStore({...newStore, name:e.target.value})} placeholder="Store name" style={{padding:"8px",border:`1px solid ${T.gray200}`,borderRadius:8}} />
       <input value={newStore.location} onChange={(e)=>setNewStore({...newStore, location:e.target.value})} placeholder="Location" style={{padding:"8px",border:`1px solid ${T.gray200}`,borderRadius:8}} />
-      <input type="number" value={newStore.load} onChange={(e)=>setNewStore({...newStore, load:e.target.value})} placeholder="Load %" style={{padding:"8px",border:`1px solid ${T.gray200}`,borderRadius:8}} />
-      <input type="number" value={newStore.stock_count} onChange={(e)=>setNewStore({...newStore, stock_count:e.target.value})} placeholder="Stock count" style={{padding:"8px",border:`1px solid ${T.gray200}`,borderRadius:8}} />
+      <input type="number" value={newStore.load} onChange={(e)=>setNewStore({...newStore, load:e.target.value})} placeholder="Load % (0-100)" style={{padding:"8px",border:`1px solid ${T.gray200}`,borderRadius:8}} />
+      <input type="number" value={newStore.stock_count} onChange={(e)=>setNewStore({...newStore, stock_count:e.target.value})} placeholder="Initial stock count" style={{padding:"8px",border:`1px solid ${T.gray200}`,borderRadius:8}} />
       <Btn variant="primary" size="sm" onClick={createStore}>Save</Btn>
     </div>
     {error ? <div style={{marginTop:8,fontSize:12,color:T.red}}>{error}</div> : null}
   </div>
+  {stores.length !== realStores.length ? <div style={{marginBottom:10,fontSize:12,color:T.gray500}}>Legacy seeded stores are hidden from this grid.</div> : null}
   <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:16,marginBottom:24}}>
-    {stores.map((n, idx)=><div key={n.id} style={{background:T.white,border:"1px solid "+T.gray200,borderRadius:12,padding:24}}>
+    {realStores.map((n, idx)=><div key={n.id} style={{background:T.white,border:"1px solid "+T.gray200,borderRadius:12,padding:24}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}><span style={{fontFamily:"monospace",fontSize:14,fontWeight:600,color:T.gray900}}>{n.node_id}</span><div style={{display:"flex",alignItems:"center",gap:6}}><span style={{width:8,height:8,borderRadius:"50%",background:n.active?T.green:T.red}}/><span style={{fontSize:12,color:n.active?T.green:T.red,fontWeight:500}}>{n.active?"Active":"Offline"}</span></div></div>
-      <input value={n.name} onChange={(e)=>setStores(stores.map((s,i)=> i===idx ? {...s, name:e.target.value} : s))} style={{width:"100%",marginBottom:8,padding:"8px",border:`1px solid ${T.gray200}`,borderRadius:8,fontSize:13}} />
-      <input value={n.location} onChange={(e)=>setStores(stores.map((s,i)=> i===idx ? {...s, location:e.target.value} : s))} style={{width:"100%",marginBottom:12,padding:"8px",border:`1px solid ${T.gray200}`,borderRadius:8,fontSize:12,color:T.gray600}} />
+      <input value={n.name} onChange={(e)=>setStores(stores.map((s)=> s.id===n.id ? {...s, name:e.target.value} : s))} style={{width:"100%",marginBottom:8,padding:"8px",border:`1px solid ${T.gray200}`,borderRadius:8,fontSize:13}} />
+      <input value={n.location} onChange={(e)=>setStores(stores.map((s)=> s.id===n.id ? {...s, location:e.target.value} : s))} style={{width:"100%",marginBottom:12,padding:"8px",border:`1px solid ${T.gray200}`,borderRadius:8,fontSize:12,color:T.gray600}} />
       <div style={{marginBottom:12}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{fontSize:11,color:T.gray500}}>Load</span><span style={{fontSize:11,fontWeight:600}}>{n.load}%</span></div><div style={{height:8,borderRadius:4,background:T.gray100,overflow:"hidden"}}><div style={{height:"100%",borderRadius:4,width:n.load+"%",background:n.load>80?T.red:n.load>50?T.yellow:T.green}}/></div></div>
       <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"center"}}>
         <div style={{fontSize:12,color:T.gray500}}>{n.stock_count} in stock</div>

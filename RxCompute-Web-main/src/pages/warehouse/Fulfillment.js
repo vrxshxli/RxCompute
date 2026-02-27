@@ -19,6 +19,9 @@ export default function WarehouseFulfillment() {
   const [singleMsg, setSingleMsg] = useState("");
   const [bulkMsg, setBulkMsg] = useState("");
   const [csvMsg, setCsvMsg] = useState("");
+  const [tableMsg, setTableMsg] = useState("");
+  const [editingMedicineId, setEditingMedicineId] = useState(null);
+  const [editMedicineForm, setEditMedicineForm] = useState({ name: "", pzn: "", price: "", warehouse_stock: "" });
   const [sendForm, setSendForm] = useState({
     medicine_id: "",
     quantity: "10",
@@ -265,6 +268,67 @@ export default function WarehouseFulfillment() {
     } catch (_) {}
   };
 
+  const startEditMedicine = (m) => {
+    setEditingMedicineId(m.medicine_id);
+    setEditMedicineForm({
+      name: m.medicine_name || "",
+      pzn: m.pzn || "",
+      price: String(m.price ?? ""),
+      warehouse_stock: String(m.quantity ?? 0),
+    });
+    setTableMsg("");
+  };
+
+  const saveEditMedicine = async () => {
+    if (!token || !editingMedicineId) return;
+    setTableMsg("");
+    try {
+      const res = await fetch(`${apiBase}/warehouse/medicines/${editingMedicineId}`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: editMedicineForm.name.trim() || null,
+          price: editMedicineForm.price === "" ? null : Number(editMedicineForm.price),
+          warehouse_stock: editMedicineForm.warehouse_stock === "" ? null : Number(editMedicineForm.warehouse_stock),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setTableMsg(data?.detail || "Unable to update medicine");
+        return;
+      }
+      setTableMsg("Medicine updated");
+      setEditingMedicineId(null);
+      await load();
+    } catch (_) {
+      setTableMsg("Network error while updating medicine");
+    }
+  };
+
+  const deleteMedicine = async (medicineId) => {
+    if (!token) return;
+    if (!window.confirm("Delete this medicine from warehouse stock?")) return;
+    setTableMsg("");
+    try {
+      const res = await fetch(`${apiBase}/warehouse/medicines/${medicineId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setTableMsg(data?.detail || "Unable to delete medicine");
+        return;
+      }
+      setTableMsg("Medicine removed from warehouse");
+      await load();
+    } catch (_) {
+      setTableMsg("Network error while deleting medicine");
+    }
+  };
+
   const queuedOutbound = useMemo(
     () => outboundTransfers.filter((x) => ["requested", "picking", "packed"].includes(x.status)),
     [outboundTransfers],
@@ -349,10 +413,26 @@ export default function WarehouseFulfillment() {
       ) : null}
       <div style={{ marginBottom: 12, background: T.white, border: `1px solid ${T.gray200}`, borderRadius: 12, padding: 14 }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: T.gray900, marginBottom: 8 }}>Warehouse Medicines Table</div>
-        <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr", gap: 6, fontSize: 11, color: T.gray500, marginBottom: 8 }}>
-          <div>Name</div><div>PZN</div><div>Price</div><div>Warehouse Stock</div>
+        <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr", gap: 6, fontSize: 11, color: T.gray500, marginBottom: 8 }}>
+          <div>Name</div><div>PZN</div><div>Price</div><div>Warehouse Stock</div><div>Actions</div>
         </div>
-        {stock.length === 0 ? <div style={{ fontSize: 12, color: T.gray500 }}>No medicines in warehouse stock yet. Use Add/Bulk/CSV upload.</div> : stock.map((m) => <div key={m.medicine_id} style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr", gap: 6, padding: "7px 0", borderBottom: `1px solid ${T.gray100}`, fontSize: 12 }}><div>{m.medicine_name}</div><div>{m.pzn}</div><div>₹{Number(m.price || 0).toFixed(2)}</div><div>{m.quantity}</div></div>)}
+        {stock.length === 0 ? <div style={{ fontSize: 12, color: T.gray500 }}>No medicines in warehouse stock yet. Use Add/Bulk/CSV upload.</div> : stock.map((m) => <div key={m.medicine_id} style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr", gap: 6, padding: "7px 0", borderBottom: `1px solid ${T.gray100}`, fontSize: 12 }}><div>{m.medicine_name}</div><div>{m.pzn}</div><div>₹{Number(m.price || 0).toFixed(2)}</div><div>{m.quantity}</div><div style={{ display:"flex", gap:6 }}><Btn variant="secondary" size="sm" onClick={() => startEditMedicine(m)}>Edit</Btn><Btn variant="secondary" size="sm" style={{ color:T.red }} onClick={() => deleteMedicine(m.medicine_id)}>Delete</Btn></div></div>)}
+        {editingMedicineId ? (
+          <div style={{ marginTop:10, border:`1px solid ${T.gray200}`, borderRadius:10, padding:10 }}>
+            <div style={{ fontSize:12, fontWeight:600, marginBottom:8 }}>Edit Warehouse Medicine</div>
+            <div style={{ display:"grid", gridTemplateColumns:"2fr 1fr 1fr 1fr auto", gap:8 }}>
+              <input value={editMedicineForm.name} onChange={(e)=>setEditMedicineForm({...editMedicineForm, name:e.target.value})} placeholder="Name" style={{ padding:8, border:`1px solid ${T.gray200}`, borderRadius:8 }} />
+              <input value={editMedicineForm.pzn} disabled style={{ padding:8, border:`1px solid ${T.gray200}`, borderRadius:8, background:T.gray50 }} />
+              <input value={editMedicineForm.price} onChange={(e)=>setEditMedicineForm({...editMedicineForm, price:e.target.value})} placeholder="Price" type="number" style={{ padding:8, border:`1px solid ${T.gray200}`, borderRadius:8 }} />
+              <input value={editMedicineForm.warehouse_stock} onChange={(e)=>setEditMedicineForm({...editMedicineForm, warehouse_stock:e.target.value})} placeholder="Warehouse stock" type="number" style={{ padding:8, border:`1px solid ${T.gray200}`, borderRadius:8 }} />
+              <div style={{ display:"flex", gap:6 }}>
+                <Btn variant="primary" size="sm" onClick={saveEditMedicine}>Save</Btn>
+                <Btn variant="secondary" size="sm" onClick={()=>setEditingMedicineId(null)}>Cancel</Btn>
+              </div>
+            </div>
+          </div>
+        ) : null}
+        {tableMsg ? <div style={{ marginTop:8, fontSize:12, color: tableMsg.toLowerCase().includes("unable") || tableMsg.toLowerCase().includes("error") ? T.red : T.green }}>{tableMsg}</div> : null}
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         {queuedOutbound.map((t) => (

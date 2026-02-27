@@ -20,6 +20,7 @@ from schemas.warehouse import (
     AdminToWarehouseCreate,
     WarehouseMedicineBulkCreate,
     WarehouseMedicineCreate,
+    WarehouseMedicineUpdate,
     WarehouseStockOut,
     WarehouseToPharmacyCreate,
     WarehouseTransferOut,
@@ -239,6 +240,64 @@ def add_warehouse_medicines_bulk(
         created_or_updated += 1
     db.commit()
     return {"message": "Bulk upload completed", "processed": created_or_updated}
+
+
+@router.put("/medicines/{medicine_id}")
+def update_warehouse_medicine(
+    medicine_id: int,
+    data: WarehouseMedicineUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _ensure_warehouse_or_admin(current_user)
+    med = db.query(Medicine).filter(Medicine.id == medicine_id).first()
+    if not med:
+        raise HTTPException(status_code=404, detail="Medicine not found")
+    update_data = data.model_dump(exclude_unset=True)
+    warehouse_stock = update_data.pop("warehouse_stock", None)
+    if "pzn" in update_data and update_data["pzn"]:
+        existing = db.query(Medicine).filter(Medicine.pzn == update_data["pzn"], Medicine.id != medicine_id).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="PZN already exists")
+    for key, value in update_data.items():
+        setattr(med, key, value)
+    stock = _get_or_create_stock(db, medicine_id)
+    if warehouse_stock is not None:
+        if warehouse_stock < 0:
+            raise HTTPException(status_code=400, detail="Warehouse stock cannot be negative")
+        stock.quantity = int(warehouse_stock)
+    db.commit()
+    db.refresh(med)
+    db.refresh(stock)
+    return {
+        "medicine_id": med.id,
+        "name": med.name,
+        "pzn": med.pzn,
+        "warehouse_stock": stock.quantity,
+        "message": "Warehouse medicine updated",
+    }
+
+
+@router.delete("/medicines/{medicine_id}")
+def delete_warehouse_medicine(
+    medicine_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _ensure_warehouse_or_admin(current_user)
+    med = db.query(Medicine).filter(Medicine.id == medicine_id).first()
+    if not med:
+        raise HTTPException(status_code=404, detail="Medicine not found")
+    stock = db.query(WarehouseStock).filter(WarehouseStock.medicine_id == medicine_id).first()
+    if stock:
+        db.delete(stock)
+    # Delete medicine only when there is no admin stock left.
+    if (med.stock or 0) <= 0:
+        has_transfers = db.query(WarehouseTransfer).filter(WarehouseTransfer.medicine_id == medicine_id).first()
+        if not has_transfers:
+            db.delete(med)
+    db.commit()
+    return {"message": "Medicine removed from warehouse stock"}
 
 
 @router.post("/medicines/import-csv")

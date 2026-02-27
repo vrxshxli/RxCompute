@@ -80,6 +80,23 @@ def update_medicine(
     return med
 
 
+@router.delete("/{medicine_id}")
+def delete_medicine(
+    medicine_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Delete a medicine entry (admin only)."""
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Only admin can delete medicines")
+    med = db.query(Medicine).filter(Medicine.id == medicine_id).first()
+    if not med:
+        raise HTTPException(status_code=404, detail="Medicine not found")
+    db.delete(med)
+    db.commit()
+    return {"message": "Medicine deleted"}
+
+
 @router.put("/{medicine_id}/add-stock", response_model=MedicineOut)
 def add_medicine_stock(
     medicine_id: int,
