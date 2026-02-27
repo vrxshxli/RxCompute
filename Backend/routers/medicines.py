@@ -11,6 +11,7 @@ from models.medicine import Medicine
 from schemas.medicine import MedicineCreate, MedicineUpdate, MedicineOut
 
 router = APIRouter(prefix="/medicines", tags=["Medicines"])
+WAREHOUSE_STAFF_ROLES = {"admin", "warehouse"}
 
 
 @router.get("/", response_model=list[MedicineOut])
@@ -74,6 +75,25 @@ def update_medicine(
         raise HTTPException(status_code=404, detail="Medicine not found")
     for key, value in data.model_dump(exclude_unset=True).items():
         setattr(med, key, value)
+    db.commit()
+    db.refresh(med)
+    return med
+
+
+@router.put("/{medicine_id}/add-stock", response_model=MedicineOut)
+def add_medicine_stock(
+    medicine_id: int,
+    units: int = Query(..., gt=0, description="Number of units to add to warehouse stock"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Increase medicine stock from warehouse intake."""
+    if current_user.role not in WAREHOUSE_STAFF_ROLES:
+        raise HTTPException(status_code=403, detail="Only warehouse or admin can add stock")
+    med = db.query(Medicine).filter(Medicine.id == medicine_id).first()
+    if not med:
+        raise HTTPException(status_code=404, detail="Medicine not found")
+    med.stock = (med.stock or 0) + units
     db.commit()
     db.refresh(med)
     return med

@@ -33,6 +33,7 @@ import WarehousePickPack from './pages/warehouse/PickPack';
 import WarehouseShelfHeatmap from './pages/warehouse/ShelfHeatmap';
 import WarehouseDispatch from './pages/warehouse/Dispatch';
 import WarehouseRecall from './pages/warehouse/RecallMode';
+import WarehouseProfile from './pages/warehouse/Profile';
 
 /* ═══════ NAV CONFIGS ═══════ */
 const ADMIN_NAV = [
@@ -62,6 +63,7 @@ const WAREHOUSE_NAV = [
   { key: "shelf-heatmap", label: "Shelf Heatmap", icon: Grid3X3 },
   { key: "dispatch", label: "Dispatch", icon: Truck },
   { key: "recalls", label: "Recall Mode", icon: AlertTriangle },
+  { key: "profile", label: "Profile", icon: UserCircle2 },
 ];
 
 /* ═══════ DASHBOARD SHELL (sidebar + topbar + content) ═══════ */
@@ -127,6 +129,7 @@ function DashboardShell() {
       case "shelf-heatmap": return <WarehouseShelfHeatmap />;
       case "dispatch": return <WarehouseDispatch />;
       case "recalls": return <WarehouseRecall />;
+      case "profile": return <WarehouseProfile />;
       default: return <WarehouseFulfillment />;
     }
   };

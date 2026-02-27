@@ -186,9 +186,21 @@ def update_order_status(
                 OrderStatus.dispatched.value,
             }:
                 raise HTTPException(status_code=400, detail="Order must be pharmacy-approved first")
+    elif current_user.role == "warehouse":
+        # Warehouse pick-pack-dispatch workflow.
+        if new_status == OrderStatus.picking and old_status not in {
+            OrderStatus.verified.value,
+            OrderStatus.confirmed.value,
+        }:
+            raise HTTPException(status_code=400, detail="Only verified orders can move to picking")
+        if new_status == OrderStatus.packed and old_status != OrderStatus.picking.value:
+            raise HTTPException(status_code=400, detail="Order must be picking before it can be packed")
+        if new_status == OrderStatus.dispatched and old_status != OrderStatus.packed.value:
+            raise HTTPException(status_code=400, detail="Order must be packed before it can be dispatched")
+        if new_status not in {OrderStatus.picking, OrderStatus.packed, OrderStatus.dispatched}:
+            raise HTTPException(status_code=403, detail="Warehouse can set only PICKING, PACKED or DISPATCHED")
     else:
-        # Warehouse role is read-only in this workflow.
-        raise HTTPException(status_code=403, detail="Warehouse cannot update order status in current workflow")
+        raise HTTPException(status_code=403, detail="Role cannot update order status")
 
     # On first approval (pending -> confirmed/verified), reserve stock from inventory.
     if old_status == OrderStatus.pending.value and new_status in {OrderStatus.confirmed, OrderStatus.verified}:
