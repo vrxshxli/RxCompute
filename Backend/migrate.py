@@ -15,6 +15,7 @@ from models.notification import Notification  # noqa: F401
 from models.user_medication import UserMedication  # noqa: F401
 from models.webhook_log import WebhookLog  # noqa: F401
 from models.pharmacy_store import PharmacyStore  # noqa: F401
+from models.warehouse import WarehouseStock, WarehouseTransfer  # noqa: F401
 from services.security import hash_password
 
 

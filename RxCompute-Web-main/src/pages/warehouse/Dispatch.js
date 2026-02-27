@@ -6,18 +6,18 @@ import { useAuth } from '../../context/AuthContext';
 
 export default function WarehouseDispatch() {
   const { token, apiBase } = useAuth();
-  const [orders, setOrders] = useState([]);
-  const [savingOrderId, setSavingOrderId] = useState(null);
+  const [transfers, setTransfers] = useState([]);
+  const [savingTransferId, setSavingTransferId] = useState(null);
 
   const load = async () => {
     if (!token) return;
     try {
-      const res = await fetch(`${apiBase}/orders/`, {
+      const res = await fetch(`${apiBase}/warehouse/transfers?direction=warehouse_to_pharmacy`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) return;
       const data = await res.json();
-      setOrders(Array.isArray(data) ? data : []);
+      setTransfers(Array.isArray(data) ? data : []);
     } catch (_) {}
   };
 
@@ -27,17 +27,17 @@ export default function WarehouseDispatch() {
 
   const packed = useMemo(
     () =>
-      orders
+      transfers
         .filter((o) => o.status === "packed" || o.status === "dispatched")
         .map((o) => ({ ...o, tracking: o.status === "dispatched" ? `TRK-${String(o.id).padStart(6, "0")}` : null })),
-    [orders],
+    [transfers],
   );
 
-  const dispatchOrder = async (orderId) => {
+  const dispatchTransfer = async (transferId) => {
     if (!token) return;
-    setSavingOrderId(orderId);
+    setSavingTransferId(transferId);
     try {
-      await fetch(`${apiBase}/orders/${orderId}/status`, {
+      await fetch(`${apiBase}/warehouse/transfers/${transferId}/status`, {
         method: "PUT",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -48,16 +48,16 @@ export default function WarehouseDispatch() {
       await load();
     } catch (_) {
     } finally {
-      setSavingOrderId(null);
+      setSavingTransferId(null);
     }
   };
 
   const batchDispatch = async () => {
     const toDispatch = packed.filter((o) => o.status !== "dispatched");
-    for (const order of toDispatch) {
+    for (const tx of toDispatch) {
       // Keep requests sequential for predictable status updates.
       // eslint-disable-next-line no-await-in-loop
-      await dispatchOrder(order.id);
+      await dispatchTransfer(tx.id);
     }
   };
 
@@ -69,13 +69,13 @@ export default function WarehouseDispatch() {
           <div key={o.id} style={{ background: T.white, border: `1px solid ${T.gray200}`, borderRadius: 12, padding: 16, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div>
               <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 4 }}>
-                <span style={{ fontFamily: "monospace", fontSize: 12, fontWeight: 600 }}>{o.order_uid}</span>
+                <span style={{ fontFamily: "monospace", fontSize: 12, fontWeight: 600 }}>TRF-{String(o.id).padStart(5, "0")}</span>
                 <StatusPill status={o.status} />
               </div>
-              <div style={{ fontSize: 12, color: T.gray500 }}>{(o.items || []).map((x) => (x.name || "").split(" ").slice(0, 2).join(" ")).join(", ")}</div>
+              <div style={{ fontSize: 12, color: T.gray500 }}>{o.medicine_name} · Qty {o.quantity} · {o.pharmacy_store_name || "-"}</div>
               {o.tracking && <div style={{ fontSize: 11, fontFamily: "monospace", color: T.blue, marginTop: 4 }}>{o.tracking}</div>}
             </div>
-            {o.status !== "dispatched" ? <Btn variant="success" size="sm" disabled={savingOrderId === o.id} onClick={() => dispatchOrder(o.id)}><Truck size={12} />Send to Pharmacy</Btn> : <span style={{ fontSize: 12, color: T.green, fontWeight: 600 }}>Dispatched</span>}
+            {o.status !== "dispatched" ? <Btn variant="success" size="sm" disabled={savingTransferId === o.id} onClick={() => dispatchTransfer(o.id)}><Truck size={12} />Send to Pharmacy</Btn> : <span style={{ fontSize: 12, color: T.green, fontWeight: 600 }}>Dispatched</span>}
           </div>
         ))}
         {packed.length === 0 && <div style={{ textAlign: "center", padding: 60, color: T.gray400 }}><Package size={48} strokeWidth={1} /><div style={{ marginTop: 16, fontWeight: 600 }}>No packed orders</div></div>}

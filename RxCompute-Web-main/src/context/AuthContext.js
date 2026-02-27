@@ -95,7 +95,31 @@ export function AuthProvider({ children }) {
     setUser(null);
   };
 
-  const value = useMemo(() => ({ user, token, login, logout, apiBase: API_BASE }), [user, token]);
+  const refreshUserFromProfile = async () => {
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_BASE}/users/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return;
+      const me = await res.json();
+      setUser((prev) => {
+        if (!prev) return prev;
+        const bestName = fallbackNameForRole(me.role || prev.role, me.name);
+        const nextUser = {
+          ...prev,
+          email: me.email || prev.email,
+          role: normalizeRole(me.role || prev.role),
+          name: bestName,
+          avatar: deriveAvatar(bestName),
+        };
+        localStorage.setItem(USER_KEY, JSON.stringify(nextUser));
+        return nextUser;
+      });
+    } catch (_) {}
+  };
+
+  const value = useMemo(() => ({ user, token, login, logout, refreshUserFromProfile, apiBase: API_BASE }), [user, token]);
 
   return (
     <AuthContext.Provider value={value}>

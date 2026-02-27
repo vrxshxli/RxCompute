@@ -9,6 +9,7 @@ from routers.chat import router as chat_router
 from routers.jobs import router as jobs_router
 from routers.webhooks import router as webhooks_router
 from routers.pharmacy_stores import router as pharmacy_stores_router
+from routers.warehouse import router as warehouse_router
 
 __all__ = [
     "auth_router",
@@ -22,4 +23,5 @@ __all__ = [
     "jobs_router",
     "webhooks_router",
     "pharmacy_stores_router",
+    "warehouse_router",
 ]

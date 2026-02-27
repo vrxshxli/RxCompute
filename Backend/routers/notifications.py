@@ -79,7 +79,7 @@ def _run_test_delivery(current_user: User, db: Session):
     )
     db.commit()
     send_push_if_available(current_user, title, body)
-    email_target = current_user.email or "deepakm7778@gmail.com"
+    email_target = current_user.email or "rxcompute@35ddfa3956a414ee.maileroo.org"
     email_ok = send_test_email(
         recipient_email=email_target,
         subject="RxCompute Test Email",

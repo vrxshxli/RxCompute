@@ -5,7 +5,7 @@ import { MapPin, LocateFixed } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
 export default function WarehouseProfile() {
-  const { token, apiBase, user } = useAuth();
+  const { token, apiBase, user, refreshUserFromProfile } = useAuth();
   const [form, setForm] = useState({
     name: "",
     email: "",
@@ -97,6 +97,7 @@ export default function WarehouseProfile() {
       if (!res.ok) {
         setMsg(data?.detail || "Unable to save profile");
       } else {
+        await refreshUserFromProfile();
         setMsg("Profile saved");
       }
     } catch (_) {

@@ -1,33 +1,50 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import T from '../../utils/tokens';
 import { Btn, PageHeader } from '../../components/shared';
-import { Play, CheckCircle, PackageCheck, PlusCircle } from 'lucide-react';
+import { Play, PlusCircle } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
 export default function WarehouseFulfillment() {
   const { token, apiBase } = useAuth();
-  const [orders, setOrders] = useState([]);
-  const [medicines, setMedicines] = useState([]);
-  const [savingOrderId, setSavingOrderId] = useState(null);
-  const [showStockAdd, setShowStockAdd] = useState(false);
-  const [stockForm, setStockForm] = useState({ medicineId: "", units: "10" });
-  const [stockMsg, setStockMsg] = useState("");
+  const [stock, setStock] = useState([]);
+  const [inboundTransfers, setInboundTransfers] = useState([]);
+  const [outboundTransfers, setOutboundTransfers] = useState([]);
+  const [pharmacies, setPharmacies] = useState([]);
+  const [savingTransferId, setSavingTransferId] = useState(null);
+  const [showSendPharmacy, setShowSendPharmacy] = useState(false);
+  const [sendMsg, setSendMsg] = useState("");
+  const [sendForm, setSendForm] = useState({
+    medicine_id: "",
+    quantity: "10",
+    pharmacy_store_id: "",
+    note: "",
+  });
 
   const load = async () => {
     if (!token) return;
     const headers = { Authorization: `Bearer ${token}` };
     try {
-      const [ordersRes, medsRes] = await Promise.all([
-        fetch(`${apiBase}/orders/`, { headers }),
-        fetch(`${apiBase}/medicines/?limit=500`, { headers }),
+      const [stockRes, inboundRes, outboundRes, storesRes] = await Promise.all([
+        fetch(`${apiBase}/warehouse/stock`, { headers }),
+        fetch(`${apiBase}/warehouse/transfers?direction=admin_to_warehouse`, { headers }),
+        fetch(`${apiBase}/warehouse/transfers?direction=warehouse_to_pharmacy`, { headers }),
+        fetch(`${apiBase}/pharmacy-stores/`, { headers }),
       ]);
-      if (ordersRes.ok) {
-        const data = await ordersRes.json();
-        setOrders(Array.isArray(data) ? data : []);
+      if (stockRes.ok) {
+        const data = await stockRes.json();
+        setStock(Array.isArray(data) ? data : []);
       }
-      if (medsRes.ok) {
-        const data = await medsRes.json();
-        setMedicines(Array.isArray(data) ? data : []);
+      if (inboundRes.ok) {
+        const data = await inboundRes.json();
+        setInboundTransfers(Array.isArray(data) ? data : []);
+      }
+      if (outboundRes.ok) {
+        const data = await outboundRes.json();
+        setOutboundTransfers(Array.isArray(data) ? data : []);
+      }
+      if (storesRes.ok) {
+        const data = await storesRes.json();
+        setPharmacies(Array.isArray(data) ? data : []);
       }
     } catch (_) {}
   };
@@ -36,11 +53,11 @@ export default function WarehouseFulfillment() {
     load();
   }, [token, apiBase]);
 
-  const updateOrderStatus = async (orderId, status) => {
+  const updateTransferStatus = async (transferId, status) => {
     if (!token) return;
-    setSavingOrderId(orderId);
+    setSavingTransferId(transferId);
     try {
-      await fetch(`${apiBase}/orders/${orderId}/status`, {
+      await fetch(`${apiBase}/warehouse/transfers/${transferId}/status`, {
         method: "PUT",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -51,101 +68,103 @@ export default function WarehouseFulfillment() {
       await load();
     } catch (_) {
     } finally {
-      setSavingOrderId(null);
+      setSavingTransferId(null);
     }
   };
 
-  const addStock = async () => {
-    if (!token || !stockForm.medicineId || Number(stockForm.units) <= 0) {
-      setStockMsg("Choose medicine and valid units");
+  const sendToPharmacy = async () => {
+    if (!token || !sendForm.medicine_id || !sendForm.pharmacy_store_id || Number(sendForm.quantity) <= 0) {
+      setSendMsg("Choose medicine, pharmacy and valid quantity");
       return;
     }
-    setStockMsg("");
+    setSendMsg("");
     try {
-      const res = await fetch(`${apiBase}/medicines/${stockForm.medicineId}/add-stock?units=${Number(stockForm.units)}`, {
-        method: "PUT",
-        headers: { Authorization: `Bearer ${token}` },
+      const res = await fetch(`${apiBase}/warehouse/transfers/warehouse-to-pharmacy`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          medicine_id: Number(sendForm.medicine_id),
+          quantity: Number(sendForm.quantity),
+          pharmacy_store_id: Number(sendForm.pharmacy_store_id),
+          note: sendForm.note.trim() || null,
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
-        setStockMsg(data?.detail || "Unable to add stock");
+        setSendMsg(data?.detail || "Unable to create pharmacy transfer");
         return;
       }
-      setStockMsg("Stock updated");
+      setSendMsg("Transfer created");
+      setSendForm({ medicine_id: "", quantity: "10", pharmacy_store_id: "", note: "" });
       await load();
     } catch (_) {
-      setStockMsg("Network error while adding stock");
+      setSendMsg("Network error while creating transfer");
     }
   };
 
-  const tasks = useMemo(
-    () =>
-      orders
-        .filter((o) => ["verified", "confirmed", "picking", "packed", "dispatched"].includes(o.status))
-        .map((o) => {
-          let stage = "dispatched";
-          if (o.status === "verified" || o.status === "confirmed") stage = "ready_to_pick";
-          if (o.status === "picking") stage = "picking";
-          if (o.status === "packed") stage = "ready_to_pack";
-          return {
-            ...o,
-            ts: stage,
-            rack: `Rack ${String.fromCharCode(65 + (o.id % 6))}${Math.floor((o.id || 1) / 6) + 1}`,
-          };
-        }),
-    [orders],
+  const queuedOutbound = useMemo(
+    () => outboundTransfers.filter((x) => ["requested", "picking", "packed"].includes(x.status)),
+    [outboundTransfers],
   );
-
-  const sc = { ready_to_pick: T.blue, picking: T.yellow, ready_to_pack: T.green, dispatched: T.gray400 };
-  const sl = { ready_to_pick: "Ready to Pick", picking: "Picking", ready_to_pack: "Ready to Send", dispatched: "Dispatched" };
+  const sc = { requested: T.blue, picking: T.yellow, packed: T.green, dispatched: T.gray400, received: T.green };
 
   return (
     <div>
       <PageHeader
-        title="Fulfillment Queue"
-        badge={String(tasks.length)}
-        actions={<Btn variant="secondary" size="sm" onClick={() => setShowStockAdd((v) => !v)}><PlusCircle size={12} />{showStockAdd ? "Close Intake" : "Add Warehouse Stock"}</Btn>}
+        title="Warehouse Fulfillment"
+        badge={`Stock SKUs: ${stock.length}`}
+        actions={<Btn variant="secondary" size="sm" onClick={() => setShowSendPharmacy((v) => !v)}><PlusCircle size={12} />{showSendPharmacy ? "Close" : "Send Medicine to Pharmacy"}</Btn>}
       />
-      {showStockAdd ? (
+      {showSendPharmacy ? (
         <div style={{ background: T.white, border: `1px solid ${T.gray200}`, borderRadius: 12, padding: 14, marginBottom: 12 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr auto", gap: 8 }}>
-            <select value={stockForm.medicineId} onChange={(e) => setStockForm({ ...stockForm, medicineId: e.target.value })} style={{ padding: 10, border: `1px solid ${T.gray200}`, borderRadius: 8 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 2fr 2fr", gap: 8 }}>
+            <select value={sendForm.medicine_id} onChange={(e) => setSendForm({ ...sendForm, medicine_id: e.target.value })} style={{ padding: 10, border: `1px solid ${T.gray200}`, borderRadius: 8 }}>
               <option value="">Select medicine</option>
-              {medicines.map((m) => <option key={m.id} value={m.id}>{m.name} (stock: {m.stock || 0})</option>)}
+              {stock.map((m) => <option key={m.medicine_id} value={m.medicine_id}>{m.medicine_name} (warehouse stock: {m.quantity || 0})</option>)}
             </select>
-            <input value={stockForm.units} onChange={(e) => setStockForm({ ...stockForm, units: e.target.value })} placeholder="Units" type="number" style={{ padding: 10, border: `1px solid ${T.gray200}`, borderRadius: 8 }} />
-            <Btn variant="primary" size="sm" onClick={addStock}>Add</Btn>
+            <input value={sendForm.quantity} onChange={(e) => setSendForm({ ...sendForm, quantity: e.target.value })} placeholder="Units" type="number" style={{ padding: 10, border: `1px solid ${T.gray200}`, borderRadius: 8 }} />
+            <select value={sendForm.pharmacy_store_id} onChange={(e) => setSendForm({ ...sendForm, pharmacy_store_id: e.target.value })} style={{ padding: 10, border: `1px solid ${T.gray200}`, borderRadius: 8 }}>
+              <option value="">Select pharmacy</option>
+              {pharmacies.map((p) => <option key={p.id} value={p.id}>{p.node_id} - {p.name}</option>)}
+            </select>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input value={sendForm.note} onChange={(e) => setSendForm({ ...sendForm, note: e.target.value })} placeholder="Note (optional)" style={{ flex: 1, padding: 10, border: `1px solid ${T.gray200}`, borderRadius: 8 }} />
+              <Btn variant="primary" size="sm" onClick={sendToPharmacy}>Create</Btn>
+            </div>
           </div>
-          {stockMsg ? <div style={{ marginTop: 8, fontSize: 12, color: stockMsg === "Stock updated" ? T.green : T.red }}>{stockMsg}</div> : null}
+          {sendMsg ? <div style={{ marginTop: 8, fontSize: 12, color: sendMsg === "Transfer created" ? T.green : T.red }}>{sendMsg}</div> : null}
         </div>
       ) : null}
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {tasks.map((t) => (
-          <div key={t.id} style={{ background: T.white, border: `1px solid ${T.gray200}`, borderRadius: 12, padding: 16, borderLeft: `4px solid ${sc[t.ts] || T.gray400}` }}>
+        {queuedOutbound.map((t) => (
+          <div key={t.id} style={{ background: T.white, border: `1px solid ${T.gray200}`, borderRadius: 12, padding: 16, borderLeft: `4px solid ${sc[t.status] || T.gray400}` }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <span style={{ fontFamily: "monospace", fontSize: 12, fontWeight: 600 }}>{t.order_uid}</span>
-                <span style={{ background: `${sc[t.ts] || T.gray400}15`, color: sc[t.ts], padding: "3px 10px", borderRadius: 6, fontSize: 10, fontWeight: 700, textTransform: "uppercase" }}>{sl[t.ts]}</span>
+                <span style={{ fontFamily: "monospace", fontSize: 12, fontWeight: 600 }}>TRF-{String(t.id).padStart(5, "0")}</span>
+                <span style={{ background: `${sc[t.status] || T.gray400}15`, color: sc[t.status], padding: "3px 10px", borderRadius: 6, fontSize: 10, fontWeight: 700, textTransform: "uppercase" }}>{t.status}</span>
               </div>
-              <span style={{ fontSize: 12, color: T.gray400 }}>to {t.pharmacy || "-"}</span>
+              <span style={{ fontSize: 12, color: T.gray400 }}>to {t.pharmacy_store_name || "-"}</span>
             </div>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
-              {(t.items || []).map((x, i) => (
-                <div key={i} style={{ padding: "8px 14px", background: T.gray50, borderRadius: 8, fontSize: 12, display: "flex", gap: 8, alignItems: "center" }}>
-                  <span style={{ fontWeight: 500, color: T.gray800 }}>{(x.name || "").split(" ").slice(0, 3).join(" ")}</span>
-                  <span style={{ color: T.blue, fontWeight: 700 }}>x{x.quantity}</span>
-                  <span style={{ color: T.gray400, fontSize: 10 }}>{t.rack}</span>
-                </div>
-              ))}
+              <div style={{ padding: "8px 14px", background: T.gray50, borderRadius: 8, fontSize: 12, display: "flex", gap: 8, alignItems: "center" }}>
+                <span style={{ fontWeight: 500, color: T.gray800 }}>{t.medicine_name}</span>
+                <span style={{ color: T.blue, fontWeight: 700 }}>x{t.quantity}</span>
+              </div>
             </div>
             <div style={{ display: "flex", gap: 8 }}>
-              {t.ts === "ready_to_pick" && <Btn variant="primary" size="sm" disabled={savingOrderId === t.id} onClick={() => updateOrderStatus(t.id, "picking")}><Play size={12} />Start Pick</Btn>}
-              {t.ts === "picking" && <Btn variant="success" size="sm" disabled={savingOrderId === t.id} onClick={() => updateOrderStatus(t.id, "packed")}><PackageCheck size={12} />Mark Packed</Btn>}
-              {t.ts === "ready_to_pack" && <Btn variant="primary" size="sm" disabled={savingOrderId === t.id} onClick={() => updateOrderStatus(t.id, "dispatched")}><CheckCircle size={12} />Send to Pharmacy</Btn>}
-              {t.ts === "dispatched" && <span style={{ fontSize: 12, color: T.green, fontWeight: 600 }}>Done</span>}
+              {t.status === "requested" && <Btn variant="primary" size="sm" disabled={savingTransferId === t.id} onClick={() => updateTransferStatus(t.id, "picking")}><Play size={12} />Start Pick</Btn>}
+              {t.status === "picking" && <span style={{ fontSize: 12, color: T.yellow, fontWeight: 600 }}>In Picking</span>}
+              {t.status === "packed" && <span style={{ fontSize: 12, color: T.green, fontWeight: 600 }}>Ready for Dispatch</span>}
             </div>
           </div>
         ))}
+      </div>
+      <div style={{ marginTop: 20, background: T.white, border: `1px solid ${T.gray200}`, borderRadius: 12, padding: 14 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: T.gray900, marginBottom: 8 }}>Inbound from Admin</div>
+        {inboundTransfers.slice(0, 8).map((x) => <div key={x.id} style={{ fontSize: 12, color: T.gray700, padding: "6px 0", borderBottom: `1px solid ${T.gray100}` }}>{x.medicine_name} · +{x.quantity} · {new Date(x.created_at).toLocaleString()}</div>)}
       </div>
     </div>
   );

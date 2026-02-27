@@ -11,8 +11,11 @@ export default function AdminInventory() {
   const [view, setView] = useState("cards");
   const [medicines, setMedicines] = useState([]);
   const [showAdd, setShowAdd] = useState(false);
+  const [showSendWarehouse, setShowSendWarehouse] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [sendingWarehouse, setSendingWarehouse] = useState(false);
   const [addError, setAddError] = useState("");
+  const [warehouseMsg, setWarehouseMsg] = useState("");
   const [form, setForm] = useState({
     name: "",
     pzn: "",
@@ -21,6 +24,11 @@ export default function AdminInventory() {
     stock: "50",
     rx_required: false,
     description: "",
+  });
+  const [warehouseForm, setWarehouseForm] = useState({
+    medicine_id: "",
+    quantity: "10",
+    note: "",
   });
 
   const loadMedicines = async () => {
@@ -97,6 +105,42 @@ export default function AdminInventory() {
     }
   };
 
+  const sendToWarehouse = async () => {
+    if (!token) return;
+    if (!warehouseForm.medicine_id || Number(warehouseForm.quantity) <= 0) {
+      setWarehouseMsg("Choose medicine and valid quantity");
+      return;
+    }
+    setSendingWarehouse(true);
+    setWarehouseMsg("");
+    try {
+      const res = await fetch(`${apiBase}/warehouse/transfers/admin-to-warehouse`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          medicine_id: Number(warehouseForm.medicine_id),
+          quantity: Number(warehouseForm.quantity),
+          note: warehouseForm.note.trim() || null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setWarehouseMsg(data?.detail || "Unable to send medicine to warehouse");
+      } else {
+        setWarehouseMsg("Sent to warehouse");
+        setWarehouseForm({ medicine_id: "", quantity: "10", note: "" });
+        await loadMedicines();
+      }
+    } catch (_) {
+      setWarehouseMsg("Network error while sending");
+    } finally {
+      setSendingWarehouse(false);
+    }
+  };
+
   const filtered = useMemo(() => {
     let d = medicines;
     if (search) d = d.filter(m => m.name.toLowerCase().includes(search.toLowerCase()));
@@ -108,7 +152,7 @@ export default function AdminInventory() {
   }, [medicines, search, filter]);
 
   return (<div>
-    <PageHeader title="Medicine Inventory" badge={`${medicines.length} products`} actions={<><Btn variant="secondary" size="sm" onClick={() => setShowAdd(!showAdd)}>{showAdd ? "Close Add" : "Add Medicine"}</Btn><Btn variant="secondary" size="sm" onClick={() => setView(view==="cards"?"heatmap":"cards")}><Grid3X3 size={14} />{view==="cards"?"Heatmap":"Cards"}</Btn><Btn variant="secondary" size="sm"><Download size={14} />Export</Btn></>} />
+    <PageHeader title="Medicine Inventory" badge={`${medicines.length} products`} actions={<><Btn variant="secondary" size="sm" onClick={() => setShowAdd(!showAdd)}>{showAdd ? "Close Add" : "Add Medicine"}</Btn><Btn variant="secondary" size="sm" onClick={() => setShowSendWarehouse(!showSendWarehouse)}>{showSendWarehouse ? "Close Transfer" : "Send to Warehouse"}</Btn><Btn variant="secondary" size="sm" onClick={() => setView(view==="cards"?"heatmap":"cards")}><Grid3X3 size={14} />{view==="cards"?"Heatmap":"Cards"}</Btn><Btn variant="secondary" size="sm"><Download size={14} />Export</Btn></>} />
     {showAdd && (
       <div style={{ background:T.white, border:"1px solid "+T.gray200, borderRadius:12, padding:14, marginBottom:12 }}>
         <div style={{ display:"grid", gridTemplateColumns:"repeat(4, minmax(120px, 1fr))", gap:10 }}>
@@ -125,6 +169,20 @@ export default function AdminInventory() {
           <Btn variant="primary" size="sm" onClick={createMedicine} disabled={saving}>{saving ? "Saving..." : "Save"}</Btn>
         </div>
         {addError ? <div style={{ marginTop:8, color:T.red, fontSize:12 }}>{addError}</div> : null}
+      </div>
+    )}
+    {showSendWarehouse && (
+      <div style={{ background:T.white, border:"1px solid "+T.gray200, borderRadius:12, padding:14, marginBottom:12 }}>
+        <div style={{ display:"grid", gridTemplateColumns:"2fr 1fr 2fr auto", gap:10 }}>
+          <select value={warehouseForm.medicine_id} onChange={(e)=>setWarehouseForm({...warehouseForm, medicine_id:e.target.value})} style={{ padding:"10px", border:`1px solid ${T.gray200}`, borderRadius:8 }}>
+            <option value="">Select medicine</option>
+            {medicines.map((m)=><option key={m.id} value={m.id}>{m.name} (admin stock: {m.stock})</option>)}
+          </select>
+          <input value={warehouseForm.quantity} onChange={(e)=>setWarehouseForm({...warehouseForm, quantity:e.target.value})} placeholder="Qty" type="number" style={{ padding:"10px", border:`1px solid ${T.gray200}`, borderRadius:8 }} />
+          <input value={warehouseForm.note} onChange={(e)=>setWarehouseForm({...warehouseForm, note:e.target.value})} placeholder="Note (optional)" style={{ padding:"10px", border:`1px solid ${T.gray200}`, borderRadius:8 }} />
+          <Btn variant="primary" size="sm" onClick={sendToWarehouse} disabled={sendingWarehouse}>{sendingWarehouse ? "Sending..." : "Send"}</Btn>
+        </div>
+        {warehouseMsg ? <div style={{ marginTop:8, color:warehouseMsg==="Sent to warehouse"?T.green:T.red, fontSize:12 }}>{warehouseMsg}</div> : null}
       </div>
     )}
     <div style={{ display:"flex", gap:12, marginBottom:16, flexWrap:"wrap", alignItems:"center" }}>

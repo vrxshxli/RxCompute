@@ -6,3 +6,4 @@ from schemas.notification import *
 from schemas.medication import *
 from schemas.webhook import *
 from schemas.pharmacy_store import *
+from schemas.warehouse import *

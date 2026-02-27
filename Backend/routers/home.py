@@ -10,7 +10,7 @@ from models.medicine import Medicine
 from models.order import Order, OrderStatus
 from models.user_medication import UserMedication
 from schemas.medication import HomeSummaryOut, UserMedicationOut
-from services.refill_reminders import calculate_days_left
+from services.refill_reminders import calculate_days_left, trigger_daily_refill_notifications_for_user
 
 router = APIRouter(prefix="/home", tags=["Home"])
 
@@ -35,6 +35,8 @@ def get_home_summary(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    # Trigger refill reminder check when app home is opened.
+    trigger_daily_refill_notifications_for_user(db, current_user)
     meds = (
         db.query(UserMedication, Medicine)
         .outerjoin(Medicine, Medicine.id == UserMedication.medicine_id)

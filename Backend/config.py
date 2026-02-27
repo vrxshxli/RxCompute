@@ -16,14 +16,13 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
 # pointing to the service account JSON, or use FIREBASE_CONFIG env var.
 FIREBASE_PROJECT_ID = os.getenv("FIREBASE_PROJECT_ID", "")
 
-# Custom SMTP config for order emails
-# Default sender kept as requested.
-SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
+# SMTP config (Maileroo defaults; can be overridden via env vars)
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.maileroo.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
-SMTP_USER = os.getenv("SMTP_USER", "deepakm7778@gmail.com")
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "nyur amcv pgmu dvau").replace(" ", "")
-SMTP_FROM_EMAIL = os.getenv("SMTP_FROM_EMAIL", "deepakm7778@gmail.com")
-SMTP_FALLBACK_TO_EMAIL = os.getenv("SMTP_FALLBACK_TO_EMAIL", "deepakm7778@gmail.com")
+SMTP_USER = os.getenv("SMTP_USER", "rxcompute@35ddfa3956a414ee.maileroo.org")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "f71f20a46ffb0046b73d746b").replace(" ", "")
+SMTP_FROM_EMAIL = os.getenv("SMTP_FROM_EMAIL", "rxcompute@35ddfa3956a414ee.maileroo.org")
+SMTP_FALLBACK_TO_EMAIL = os.getenv("SMTP_FALLBACK_TO_EMAIL", "rxcompute@35ddfa3956a414ee.maileroo.org")
 
 # Secret for external scheduler endpoint (e.g., cron-job.org)
 JOB_RUN_KEY = os.getenv("JOB_RUN_KEY", "")

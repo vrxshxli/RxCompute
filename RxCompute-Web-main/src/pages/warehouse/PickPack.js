@@ -6,18 +6,18 @@ import { useAuth } from '../../context/AuthContext';
 
 export default function WarehousePickPack() {
   const { token, apiBase } = useAuth();
-  const [orders, setOrders] = useState([]);
-  const [savingOrderId, setSavingOrderId] = useState(null);
+  const [transfers, setTransfers] = useState([]);
+  const [savingTransferId, setSavingTransferId] = useState(null);
 
   const load = async () => {
     if (!token) return;
     try {
-      const res = await fetch(`${apiBase}/orders/`, {
+      const res = await fetch(`${apiBase}/warehouse/transfers?direction=warehouse_to_pharmacy`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) return;
       const data = await res.json();
-      setOrders(Array.isArray(data) ? data : []);
+      setTransfers(Array.isArray(data) ? data : []);
     } catch (_) {}
   };
 
@@ -25,11 +25,11 @@ export default function WarehousePickPack() {
     load();
   }, [token, apiBase]);
 
-  const updateOrderStatus = async (orderId, status) => {
+  const updateTransferStatus = async (transferId, status) => {
     if (!token) return;
-    setSavingOrderId(orderId);
+    setSavingTransferId(transferId);
     try {
-      await fetch(`${apiBase}/orders/${orderId}/status`, {
+      await fetch(`${apiBase}/warehouse/transfers/${transferId}/status`, {
         method: "PUT",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -40,26 +40,21 @@ export default function WarehousePickPack() {
       await load();
     } catch (_) {
     } finally {
-      setSavingOrderId(null);
+      setSavingTransferId(null);
     }
   };
 
   const items = useMemo(
     () =>
-      orders
-        .filter((o) => ["verified", "confirmed", "picking", "packed"].includes(o.status))
-        .flatMap((o) =>
-          (o.items || []).map((it) => ({
-            ...it,
-            orderId: o.id,
-            oid: o.order_uid,
-            orderStatus: o.status,
-            rack: `Rack ${String.fromCharCode(65 + ((it.medicine_id || 0) % 6))}`,
-            shelf: `Shelf ${((it.medicine_id || 0) % 4) + 1}`,
-          })),
-        )
+      transfers
+        .filter((o) => ["requested", "picking", "packed", "dispatched"].includes(o.status))
+        .map((it) => ({
+          ...it,
+          rack: `Rack ${String.fromCharCode(65 + ((it.medicine_id || 0) % 6))}`,
+          shelf: `Shelf ${((it.medicine_id || 0) % 4) + 1}`,
+        }))
         .slice(0, 24),
-    [orders],
+    [transfers],
   );
 
   return (
@@ -67,23 +62,23 @@ export default function WarehousePickPack() {
       <PageHeader title="Pick & Pack" subtitle="Grouped by rack from live warehouse queue" />
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(280px,1fr))", gap: 12 }}>
         {items.map((x, i) => {
-          const done = x.orderStatus === "packed" || x.orderStatus === "dispatched";
-          const isPicking = x.orderStatus === "picking";
-          const canStartPick = x.orderStatus === "verified" || x.orderStatus === "confirmed";
+          const done = x.status === "packed" || x.status === "dispatched";
+          const isPicking = x.status === "picking";
+          const canStartPick = x.status === "requested";
           return (
-            <div key={`${x.orderId}-${i}`} style={{ background: T.white, border: `1px solid ${done ? T.green : T.gray200}`, borderRadius: 10, padding: 16, opacity: done ? 0.75 : 1 }}>
+            <div key={`${x.id}-${i}`} style={{ background: T.white, border: `1px solid ${done ? T.green : T.gray200}`, borderRadius: 10, padding: 16, opacity: done ? 0.75 : 1 }}>
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-                <span style={{ fontFamily: "monospace", fontSize: 11, color: T.gray500 }}>{x.oid}</span>
+                <span style={{ fontFamily: "monospace", fontSize: 11, color: T.gray500 }}>TRF-{String(x.id).padStart(5, "0")}</span>
                 {done && <CheckCircle size={16} color={T.green} />}
               </div>
-              <div style={{ fontWeight: 500, color: T.gray900, marginBottom: 4 }}>{x.name}</div>
-              <div style={{ fontSize: 12, color: T.gray500, marginBottom: 8 }}>Qty: {x.quantity}</div>
+              <div style={{ fontWeight: 500, color: T.gray900, marginBottom: 4 }}>{x.medicine_name}</div>
+              <div style={{ fontSize: 12, color: T.gray500, marginBottom: 8 }}>Qty: {x.quantity} · {x.pharmacy_store_name || "-"}</div>
               <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: `${T.blue}08`, borderRadius: 8, fontSize: 12 }}>
                 <Map size={14} color={T.blue} />
                 <span style={{ color: T.blue, fontWeight: 600 }}>{x.rack}, {x.shelf}</span>
               </div>
-              {canStartPick && <Btn variant="primary" size="sm" style={{ marginTop: 10, width: "100%" }} disabled={savingOrderId === x.orderId} onClick={() => updateOrderStatus(x.orderId, "picking")}><CheckCircle size={12} />Pick</Btn>}
-              {isPicking && <Btn variant="success" size="sm" style={{ marginTop: 10, width: "100%" }} disabled={savingOrderId === x.orderId} onClick={() => updateOrderStatus(x.orderId, "packed")}><CheckCircle size={12} />Pack</Btn>}
+              {canStartPick && <Btn variant="primary" size="sm" style={{ marginTop: 10, width: "100%" }} disabled={savingTransferId === x.id} onClick={() => updateTransferStatus(x.id, "picking")}><CheckCircle size={12} />Pick</Btn>}
+              {isPicking && <Btn variant="success" size="sm" style={{ marginTop: 10, width: "100%" }} disabled={savingTransferId === x.id} onClick={() => updateTransferStatus(x.id, "packed")}><CheckCircle size={12} />Pack</Btn>}
             </div>
           );
         })}

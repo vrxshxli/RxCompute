@@ -11,11 +11,16 @@ from models.order import Order, OrderItem, OrderStatus
 from models.medicine import Medicine
 from models.notification import NotificationType
 from schemas.order import OrderCreate, OrderOut, OrderStatusUpdate
-from services.notifications import create_notification, send_order_email, send_push_if_available
+from services.notifications import (
+    create_notification,
+    send_order_email,
+    send_push_if_available,
+    send_staff_order_email,
+)
 from services.webhooks import dispatch_webhook
 
 router = APIRouter(prefix="/orders", tags=["Orders"])
-STAFF_ROLES = {"admin", "pharmacy_store", "warehouse"}
+STAFF_ROLES = {"admin", "pharmacy_store"}
 
 
 def _generate_order_uid() -> str:
@@ -30,6 +35,8 @@ def list_orders(
     db: Session = Depends(get_db),
 ):
     """List all orders for the current user."""
+    if current_user.role == "warehouse":
+        raise HTTPException(status_code=403, detail="Warehouse does not have access to customer orders")
     if current_user.role in STAFF_ROLES:
         return db.query(Order).order_by(Order.created_at.desc()).all()
     return (
@@ -47,6 +54,8 @@ def get_order(
     db: Session = Depends(get_db),
 ):
     """Get a specific order by ID."""
+    if current_user.role == "warehouse":
+        raise HTTPException(status_code=403, detail="Warehouse does not have access to customer orders")
     query = db.query(Order).filter(Order.id == order_id)
     if current_user.role not in STAFF_ROLES:
         query = query.filter(Order.user_id == current_user.id)
@@ -124,6 +133,21 @@ def create_order(
     db.commit()
     send_push_if_available(current_user, title, body)
     send_order_email(current_user, order)
+    staff_users = db.query(User).filter(User.role.in_(["admin", "pharmacy_store"])).all()
+    staff_title = "New Order Received"
+    staff_body = f"{order.order_uid} placed by user #{order.user_id}. Total {order.total:.2f}"
+    for staff in staff_users:
+        create_notification(
+            db,
+            staff.id,
+            NotificationType.order,
+            staff_title,
+            staff_body,
+            has_action=True,
+        )
+        send_push_if_available(staff, staff_title, staff_body)
+        send_staff_order_email(staff, order)
+    db.commit()
     dispatch_webhook(
         db,
         event_type="order_created",
@@ -186,19 +210,6 @@ def update_order_status(
                 OrderStatus.dispatched.value,
             }:
                 raise HTTPException(status_code=400, detail="Order must be pharmacy-approved first")
-    elif current_user.role == "warehouse":
-        # Warehouse pick-pack-dispatch workflow.
-        if new_status == OrderStatus.picking and old_status not in {
-            OrderStatus.verified.value,
-            OrderStatus.confirmed.value,
-        }:
-            raise HTTPException(status_code=400, detail="Only verified orders can move to picking")
-        if new_status == OrderStatus.packed and old_status != OrderStatus.picking.value:
-            raise HTTPException(status_code=400, detail="Order must be picking before it can be packed")
-        if new_status == OrderStatus.dispatched and old_status != OrderStatus.packed.value:
-            raise HTTPException(status_code=400, detail="Order must be packed before it can be dispatched")
-        if new_status not in {OrderStatus.picking, OrderStatus.packed, OrderStatus.dispatched}:
-            raise HTTPException(status_code=403, detail="Warehouse can set only PICKING, PACKED or DISPATCHED")
     else:
         raise HTTPException(status_code=403, detail="Role cannot update order status")
 
