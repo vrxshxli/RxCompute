@@ -16,8 +16,10 @@ import 'features/medicine/bloc/medicine_bloc.dart';
 import 'features/orders/bloc/order_bloc.dart';
 import 'features/profile/bloc/profile_bloc.dart';
 
+@pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
+  debugPrint('📩 Background message: ${message.messageId}');
 }
 
 void main() async {

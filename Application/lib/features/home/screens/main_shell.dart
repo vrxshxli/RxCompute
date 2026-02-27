@@ -36,13 +36,18 @@ class _MS extends State<MainShell> {
   Future<void> _initPushToken() async {
     try {
       final messaging = FirebaseMessaging.instance;
-      await messaging.requestPermission();
+      final settings = await messaging.requestPermission(alert: true, badge: true, sound: true);
+      debugPrint('🔔 Notification permission: ${settings.authorizationStatus}');
       final token = await messaging.getToken();
       if (token != null && token.isNotEmpty) {
+        debugPrint('🔑 FCM token acquired');
         await _userRepository.updateProfile(pushToken: token);
+      } else {
+        debugPrint('⚠️ FCM token missing');
       }
       _tokenSub = FirebaseMessaging.instance.onTokenRefresh.listen((newToken) async {
         if (newToken.isNotEmpty) {
+          debugPrint('🔄 FCM token refreshed');
           await _userRepository.updateProfile(pushToken: newToken);
         }
       });
@@ -59,7 +64,9 @@ class _MS extends State<MainShell> {
         if (!mounted) return;
         setState(() => _i = 0);
       });
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('⚠️ Push init failed: $e');
+    }
   }
 
   @override

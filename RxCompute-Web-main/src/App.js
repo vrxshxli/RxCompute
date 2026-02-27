@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Routes, Route, useNavigate, Navigate } from 'react-router-dom';
 import { LayoutGrid, Package, Bell, ShoppingCart, Shield, Search, Link2, Users, Map, Inbox, CheckCircle2, AlertTriangle, BarChart3, Grid3X3, Truck, Wifi, Menu, UserCircle2 } from 'lucide-react';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { NotificationProvider, useNotifications } from './context/NotificationContext';
 import { Logo } from './components/shared';
 import Sidebar from './components/layout/Sidebar';
 import LandingPage from './pages/landing/LandingPage';
@@ -68,7 +69,8 @@ const WAREHOUSE_NAV = [
 
 /* ═══════ DASHBOARD SHELL (sidebar + topbar + content) ═══════ */
 function DashboardShell() {
-  const { user, token, apiBase } = useAuth();
+  const { user } = useAuth();
+  const { notifications, unreadCount, markRead, markAllRead } = useNotifications();
   const role = user?.role || "admin";
   const isAdmin = role === "admin" || role === "user";
   const isPharmacy = role === "pharmacy_store" || role === "pharmacy";
@@ -76,7 +78,6 @@ function DashboardShell() {
   const [page, setPage] = useState(defaultPage);
   const [collapsed, setCollapsed] = useState(window.innerWidth < 992);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 992);
-  const [notifications, setNotifications] = useState([]);
   const [showNotifications, setShowNotifications] = useState(false);
 
   useEffect(() => {
@@ -91,39 +92,6 @@ function DashboardShell() {
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
-
-  useEffect(() => {
-    if (!token) return undefined;
-    let mounted = true;
-    let previousUnread = 0;
-    const loadNotifications = async () => {
-      try {
-        const res = await fetch(`${apiBase}/notifications/`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!res.ok) return;
-        const data = await res.json();
-        if (!mounted) return;
-        const list = Array.isArray(data) ? data : [];
-        const unread = list.filter((n) => !n.is_read).length;
-        if (unread > previousUnread) {
-          try {
-            const audio = new Audio("/rx_tune.wav");
-            audio.volume = 0.85;
-            audio.play().catch(() => {});
-          } catch (_) {}
-        }
-        previousUnread = unread;
-        setNotifications(list.slice(0, 20));
-      } catch (_) {}
-    };
-    loadNotifications();
-    const id = window.setInterval(loadNotifications, 15000);
-    return () => {
-      mounted = false;
-      window.clearInterval(id);
-    };
-  }, [token, apiBase]);
 
   const nav = isAdmin ? ADMIN_NAV : isPharmacy ? PHARMACY_NAV : WAREHOUSE_NAV;
   const handleSelectPage = (nextPage) => {
@@ -170,8 +138,6 @@ function DashboardShell() {
   };
 
   const roleColor = isAdmin ? T.orange : isPharmacy ? T.blue : T.green;
-  const unreadCount = notifications.filter((n) => !n.is_read).length;
-
   return (
     <div style={{ minHeight: "100vh", background: T.gray100 }}>
       {/* Top bar */}
@@ -201,8 +167,11 @@ function DashboardShell() {
             </button>
             {showNotifications ? (
               <div style={{ position: "absolute", right: 0, top: 28, width: 360, maxHeight: 420, overflowY: "auto", background: T.white, border: `1px solid ${T.gray200}`, borderRadius: 10, boxShadow: "0 10px 24px rgba(0,0,0,.15)", zIndex: 80 }}>
-                <div style={{ padding: 10, borderBottom: `1px solid ${T.gray100}`, fontSize: 12, fontWeight: 700, color: T.gray800 }}>Notifications</div>
-                {notifications.length === 0 ? <div style={{ padding: 12, fontSize: 12, color: T.gray500 }}>No notifications yet</div> : notifications.map((n) => <div key={n.id} style={{ padding: 10, borderBottom: `1px solid ${T.gray100}`, background: n.is_read ? T.white : `${T.blue}08` }}><div style={{ fontSize: 12, fontWeight: 600, color: T.gray800 }}>{n.title}</div><div style={{ fontSize: 11, color: T.gray500, marginTop: 3 }}>{n.body}</div></div>)}
+                <div style={{ padding: 10, borderBottom: `1px solid ${T.gray100}`, fontSize: 12, fontWeight: 700, color: T.gray800, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span>Notifications</span>
+                  <button onClick={markAllRead} style={{ border: "none", background: "transparent", color: T.blue, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>Mark all read</button>
+                </div>
+                {notifications.length === 0 ? <div style={{ padding: 12, fontSize: 12, color: T.gray500 }}>No notifications yet</div> : notifications.map((n) => <button key={n.id} onClick={() => markRead(n.id)} style={{ width: "100%", textAlign: "left", border: "none", background: n.is_read ? T.white : `${T.blue}08`, padding: 10, borderBottom: `1px solid ${T.gray100}`, cursor: "pointer" }}><div style={{ fontSize: 12, fontWeight: 600, color: T.gray800 }}>{n.title}</div><div style={{ fontSize: 11, color: T.gray500, marginTop: 3 }}>{n.body}</div></button>)}
               </div>
             ) : null}
           </div>
@@ -261,7 +230,9 @@ function AppRoutes() {
 export default function App() {
   return (
     <AuthProvider>
-      <AppRoutes />
+      <NotificationProvider>
+        <AppRoutes />
+      </NotificationProvider>
     </AuthProvider>
   );
 }
