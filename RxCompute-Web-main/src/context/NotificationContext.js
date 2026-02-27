@@ -40,9 +40,25 @@ export function NotificationProvider({ children }) {
       const newUnheard = list.filter((n) => !n.is_read && !soundedIdsRef.current.has(String(n.id)));
       if (newUnheard.length > 0) {
         try {
+          const hasSafety = newUnheard.some((n) => String(n.type || "").toLowerCase() === "safety");
           const audio = new Audio("/rx_tune.wav");
-          audio.volume = 0.9;
+          audio.volume = hasSafety ? 1.0 : 0.9;
           audio.play().catch(() => {});
+          if (hasSafety) {
+            // Safety alerts: louder repeated alarm + spoken message.
+            window.setTimeout(() => {
+              const alarm2 = new Audio("/rx_tune.wav");
+              alarm2.volume = 1.0;
+              alarm2.play().catch(() => {});
+            }, 900);
+            const safetyNote = newUnheard.find((n) => String(n.type || "").toLowerCase() === "safety");
+            if (window.speechSynthesis && safetyNote) {
+              const msg = new SpeechSynthesisUtterance(`Safety alert. ${safetyNote.title || ""}. ${safetyNote.body || ""}`);
+              msg.rate = 0.95;
+              msg.pitch = 1.0;
+              window.speechSynthesis.speak(msg);
+            }
+          }
         } catch (_) {}
         newUnheard.forEach((n) => soundedIdsRef.current.add(String(n.id)));
         persistSoundedIds(soundedIdsRef.current);

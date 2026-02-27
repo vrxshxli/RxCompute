@@ -4,6 +4,7 @@ import { LayoutGrid, Package, Bell, ShoppingCart, Shield, Search, Link2, Users, 
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { NotificationProvider, useNotifications } from './context/NotificationContext';
 import { Logo } from './components/shared';
+import VoiceSafetyAssistant from './components/shared/VoiceSafetyAssistant';
 import Sidebar from './components/layout/Sidebar';
 import LandingPage from './pages/landing/LandingPage';
 import LoginPage from './pages/auth/LoginPage';
@@ -15,6 +16,7 @@ import AdminInventory from './pages/admin/Inventory';
 import AdminRefillAlerts from './pages/admin/RefillAlerts';
 import AdminOrders from './pages/admin/Orders';
 import AdminSafetyRules from './pages/admin/SafetyRules';
+import AdminSafetyEvents from './pages/admin/SafetyEvents';
 import AdminAgentTraces from './pages/admin/AgentTraces';
 import AdminWebhookLogs from './pages/admin/WebhookLogs';
 import AdminPatients from './pages/admin/Patients';
@@ -44,6 +46,7 @@ const ADMIN_NAV = [
   { key: "inventory", label: "Inventory", icon: Package },
   { key: "refill-alerts", label: "Refill Alerts", icon: Bell },
   { key: "orders", label: "Orders", icon: ShoppingCart },
+  { key: "safety-events", label: "Safety Events", icon: AlertTriangle },
   { key: "safety-rules", label: "Safety Rules", icon: Shield },
   { key: "agent-traces", label: "Agent Traces", icon: Search },
   { key: "webhook-logs", label: "Webhook Logs", icon: Link2 },
@@ -73,7 +76,7 @@ const WAREHOUSE_NAV = [
 
 /* ═══════ DASHBOARD SHELL (sidebar + topbar + content) ═══════ */
 function DashboardShell() {
-  const { user } = useAuth();
+  const { user, token, apiBase } = useAuth();
   const { notifications, unreadCount, markRead, markAllRead } = useNotifications();
   const role = user?.role || "admin";
   const isAdmin = role === "admin" || role === "user";
@@ -110,6 +113,7 @@ function DashboardShell() {
         case "inventory": return <AdminInventory />;
         case "refill-alerts": return <AdminRefillAlerts />;
         case "orders": return <AdminOrders />;
+        case "safety-events": return <AdminSafetyEvents />;
         case "safety-rules": return <AdminSafetyRules />;
         case "agent-traces": return <AdminAgentTraces />;
         case "webhook-logs": return <AdminWebhookLogs />;
@@ -163,6 +167,14 @@ function DashboardShell() {
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: T.green }}><Wifi size={12} /> Systems OK</div>
           <div style={{ width: 1, height: 20, background: T.navy600 }} />
+          <VoiceSafetyAssistant
+            nav={nav}
+            onSelectPage={handleSelectPage}
+            notifications={notifications}
+            markAllRead={markAllRead}
+            token={token}
+            apiBase={apiBase}
+          />
           <div style={{ position: "relative" }}>
             <button
               onClick={() => setShowNotifications((v) => !v)}

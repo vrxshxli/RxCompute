@@ -12,6 +12,7 @@ from models.medicine import Medicine
 from models.pharmacy_store import PharmacyStore
 from models.notification import NotificationType
 from schemas.order import OrderCreate, OrderOut, OrderStatusUpdate
+from saftery_policies_agents.graph import process_with_safety
 from services.notifications import (
     create_notification,
     run_in_background,
@@ -22,12 +23,24 @@ from services.webhooks import dispatch_webhook
 
 router = APIRouter(prefix="/orders", tags=["Orders"])
 STAFF_ROLES = {"admin", "pharmacy_store"}
+ALERT_ROLES = {"admin", "pharmacy_store", "warehouse"}
 
 
 def _generate_order_uid() -> str:
     now = datetime.utcnow().strftime("%Y%m%d")
     short = uuid.uuid4().hex[:6].upper()
     return f"ORD-{now}-{short}"
+
+
+def _broadcast_safety_alert(db: Session, title: str, body: str, actor: User | None = None) -> None:
+    users = db.query(User).filter(User.role.in_(list(ALERT_ROLES))).all()
+    for u in users:
+        create_notification(db, u.id, NotificationType.safety, title, body, has_action=True, dedupe_window_minutes=1)
+        run_in_background(send_push_to_token, u.push_token, title, body, u.id)
+    if actor:
+        create_notification(db, actor.id, NotificationType.safety, title, body, has_action=True, dedupe_window_minutes=1)
+        run_in_background(send_push_to_token, actor.push_token, title, body, actor.id)
+    db.commit()
 
 
 @router.get("/", response_model=list[OrderOut])
@@ -73,6 +86,38 @@ def create_order(
     db: Session = Depends(get_db),
 ):
     """Create a new order with items."""
+    safety_payload = [
+        {
+            "medicine_id": it.medicine_id,
+            "name": it.name,
+            "quantity": it.quantity,
+            "prescription_file": it.prescription_file,
+        }
+        for it in data.items
+    ]
+    safety = process_with_safety(
+        user_id=current_user.id,
+        matched_medicines=safety_payload,
+        user_message="Order safety check before create_order",
+    )
+    safety_summary = (safety.get("safety_summary") or "").strip()
+    if safety.get("has_blocks"):
+        title = "Safety Alert: Order Blocked"
+        body = safety_summary or "Order blocked by safety policy checks."
+        _broadcast_safety_alert(db, title, body, current_user)
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "Order blocked by safety policy",
+                "safety_summary": body,
+                "safety_results": safety.get("safety_results", []),
+            },
+        )
+    if safety.get("has_warnings"):
+        title = "Safety Warning: Review Needed"
+        body = safety_summary or "Order has safety warnings. Pharmacist review recommended."
+        _broadcast_safety_alert(db, title, body, current_user)
+
     med_ids = [item.medicine_id for item in data.items]
     meds = (
         db.query(Medicine)

@@ -1,7 +1,8 @@
 import socket
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from config import SMTP_FROM_EMAIL, SMTP_HOST, SMTP_PORT, SMTP_USER
@@ -176,6 +177,63 @@ def delivery_health(
             "outbound_transfers_pending": transfers_pending,
         },
     }
+
+
+@router.get("/safety-events")
+def list_safety_events(
+    severity: str = Query(default="all"),
+    search: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Only admin can view safety events")
+    q = (
+        db.query(Notification, User)
+        .join(User, User.id == Notification.user_id)
+        .filter(Notification.type == NotificationType.safety)
+    )
+    sev = (severity or "all").strip().lower()
+    if sev == "blocked":
+        q = q.filter(or_(Notification.title.ilike("%blocked%"), Notification.body.ilike("%blocked%")))
+    elif sev == "warning":
+        q = q.filter(or_(Notification.title.ilike("%warning%"), Notification.body.ilike("%warning%")))
+    elif sev != "all":
+        raise HTTPException(status_code=400, detail="Invalid severity filter")
+
+    if search:
+        term = f"%{search.strip()}%"
+        q = q.filter(
+            or_(
+                Notification.title.ilike(term),
+                Notification.body.ilike(term),
+                User.name.ilike(term),
+                User.email.ilike(term),
+                User.role.ilike(term),
+            )
+        )
+
+    rows = q.order_by(Notification.created_at.desc()).limit(limit).all()
+    out = []
+    for notif, user in rows:
+        text = f"{notif.title} {notif.body}".lower()
+        row_severity = "blocked" if "blocked" in text else ("warning" if "warning" in text else "info")
+        out.append(
+            {
+                "id": notif.id,
+                "user_id": notif.user_id,
+                "user_name": user.name,
+                "user_email": user.email,
+                "user_role": user.role,
+                "title": notif.title,
+                "body": notif.body,
+                "is_read": notif.is_read,
+                "created_at": notif.created_at,
+                "severity": row_severity,
+            }
+        )
+    return out
 
 
 @router.post("/test-delivery")
