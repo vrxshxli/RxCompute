@@ -5,7 +5,7 @@ from models.notification import Notification
 from models.user_medication import UserMedication
 from models.webhook_log import WebhookLog
 from models.pharmacy_store import PharmacyStore
-from models.warehouse import WarehouseStock, WarehouseTransfer
+from models.warehouse import WarehouseStock, WarehouseTransfer, PharmacyStock
 
 __all__ = [
     "User",
@@ -19,4 +19,5 @@ __all__ = [
     "PharmacyStore",
     "WarehouseStock",
     "WarehouseTransfer",
+    "PharmacyStock",
 ]

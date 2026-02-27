@@ -498,6 +498,9 @@ export default function WarehouseFulfillment() {
               </div>
               <span style={{ fontSize: 12, color: T.gray400 }}>to {t.pharmacy_store_name || "-"}</span>
             </div>
+            <div style={{ fontSize: 11, color: T.gray500, marginBottom: 8 }}>
+              Requested by: {(t.created_by_user_role || "-").replace("_", " ")} · {t.created_by_user_name || `User #${t.created_by_user_id}`}
+            </div>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
               <div style={{ padding: "8px 14px", background: T.gray50, borderRadius: 8, fontSize: 12, display: "flex", gap: 8, alignItems: "center" }}>
                 <span style={{ fontWeight: 500, color: T.gray800 }}>{t.medicine_name}</span>

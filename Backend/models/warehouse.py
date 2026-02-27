@@ -1,6 +1,6 @@
 import enum
 
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Enum as SAEnum
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Enum as SAEnum, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -47,3 +47,17 @@ class WarehouseTransfer(Base):
 
     medicine = relationship("Medicine")
     pharmacy_store = relationship("PharmacyStore")
+
+
+class PharmacyStock(Base):
+    __tablename__ = "pharmacy_stock"
+    __table_args__ = (UniqueConstraint("pharmacy_store_id", "medicine_id", name="uq_pharmacy_store_medicine"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    pharmacy_store_id = Column(Integer, ForeignKey("pharmacy_stores.id"), nullable=False, index=True)
+    medicine_id = Column(Integer, ForeignKey("medicines.id"), nullable=False, index=True)
+    quantity = Column(Integer, default=0, nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    pharmacy_store = relationship("PharmacyStore")
+    medicine = relationship("Medicine")

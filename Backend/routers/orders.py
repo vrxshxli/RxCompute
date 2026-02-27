@@ -9,6 +9,7 @@ from dependencies import get_current_user
 from models.user import User
 from models.order import Order, OrderItem, OrderStatus
 from models.medicine import Medicine
+from models.pharmacy_store import PharmacyStore
 from models.notification import NotificationType
 from schemas.order import OrderCreate, OrderOut, OrderStatusUpdate
 from services.notifications import (
@@ -249,6 +250,11 @@ def update_order_status(
     if current_user.role == "pharmacy_store" and new_status == OrderStatus.verified:
         order.pharmacy_approved_by_name = current_user.name or current_user.email or f"User #{current_user.id}"
         order.pharmacy_approved_at = now
+        # Ensure assigned pharmacy is always visible after pharmacy verification.
+        if not order.pharmacy or str(order.pharmacy).strip().lower() in {"none", "null", "-"}:
+            node_id = f"PH-U{current_user.id:03d}"
+            store = db.query(PharmacyStore).filter(PharmacyStore.node_id == node_id).first()
+            order.pharmacy = store.node_id if store else node_id
     db.commit()
     db.refresh(order)
 

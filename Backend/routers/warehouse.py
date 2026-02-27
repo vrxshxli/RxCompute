@@ -11,6 +11,7 @@ from models.medicine import Medicine
 from models.pharmacy_store import PharmacyStore
 from models.user import User
 from models.warehouse import (
+    PharmacyStock,
     TransferDirection,
     TransferStatus,
     WarehouseStock,
@@ -21,6 +22,7 @@ from schemas.warehouse import (
     WarehouseMedicineBulkCreate,
     WarehouseMedicineCreate,
     WarehouseMedicineUpdate,
+    PharmacyStockOut,
     WarehouseStockOut,
     WarehouseToPharmacyCreate,
     WarehouseTransferOut,
@@ -53,6 +55,66 @@ def _get_or_create_stock(db: Session, medicine_id: int) -> WarehouseStock:
     db.add(row)
     db.flush()
     return row
+
+
+def _get_or_create_pharmacy_stock(db: Session, pharmacy_store_id: int, medicine_id: int) -> PharmacyStock:
+    row = (
+        db.query(PharmacyStock)
+        .filter(PharmacyStock.pharmacy_store_id == pharmacy_store_id, PharmacyStock.medicine_id == medicine_id)
+        .first()
+    )
+    if row:
+        return row
+    row = PharmacyStock(pharmacy_store_id=pharmacy_store_id, medicine_id=medicine_id, quantity=0)
+    db.add(row)
+    db.flush()
+    return row
+
+
+def _ensure_inventory_baseline(db: Session) -> None:
+    meds = db.query(Medicine).all()
+    stores = db.query(PharmacyStore).all()
+    for med in meds:
+        w_stock = _get_or_create_stock(db, med.id)
+        if (w_stock.quantity or 0) <= 0:
+            # Warehouse starts with at least admin stock + extra buffer.
+            w_stock.quantity = max((med.stock or 0) + 50, 50)
+        for st in stores:
+            p_stock = _get_or_create_pharmacy_stock(db, st.id, med.id)
+            if (p_stock.quantity or 0) <= 0:
+                # Pharmacy baseline starts equal to admin stock.
+                p_stock.quantity = max(med.stock or 0, 0)
+    db.commit()
+
+
+def _get_or_create_store_for_pharmacy_user(db: Session, user: User) -> PharmacyStore:
+    node_id = f"PH-U{user.id:03d}"
+    store = db.query(PharmacyStore).filter(PharmacyStore.node_id == node_id).first()
+    if store:
+        return store
+    display_name = (user.name or "").strip() or (user.email or f"Pharmacy User {user.id}")
+    store = PharmacyStore(
+        node_id=node_id,
+        name=display_name,
+        location="Dashboard Linked",
+        active=True,
+        load=0,
+        stock_count=0,
+    )
+    db.add(store)
+    db.commit()
+    db.refresh(store)
+    _ensure_inventory_baseline(db)
+    return store
+
+
+def _creator_meta(db: Session, user_id: int | None) -> tuple[str | None, str | None]:
+    if not user_id:
+        return None, None
+    u = db.query(User).filter(User.id == user_id).first()
+    if not u:
+        return None, None
+    return u.name, u.role
 
 
 def _upsert_warehouse_medicine(db: Session, med_data: WarehouseMedicineCreate) -> tuple[Medicine, WarehouseStock]:
@@ -89,6 +151,7 @@ def list_warehouse_stock(
     db: Session = Depends(get_db),
 ):
     _ensure_warehouse_or_admin(current_user)
+    _ensure_inventory_baseline(db)
     rows = (
         db.query(WarehouseStock, Medicine)
         .join(Medicine, Medicine.id == WarehouseStock.medicine_id)
@@ -108,6 +171,58 @@ def list_warehouse_stock(
     ]
 
 
+@router.get("/pharmacy-stock", response_model=list[PharmacyStockOut])
+def list_pharmacy_stock(
+    pharmacy_store_id: int | None = Query(default=None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if current_user.role not in {"admin", "warehouse", "pharmacy_store"}:
+        raise HTTPException(status_code=403, detail="Access denied")
+    _ensure_inventory_baseline(db)
+    target_store_id = pharmacy_store_id
+    if current_user.role == "pharmacy_store":
+        node_id = f"PH-U{current_user.id:03d}"
+        own_store = db.query(PharmacyStore).filter(PharmacyStore.node_id == node_id).first()
+        if not own_store:
+            display_name = (current_user.name or "").strip() or (current_user.email or f"Pharmacy User {current_user.id}")
+            own_store = PharmacyStore(
+                node_id=node_id,
+                name=display_name,
+                location="Dashboard Linked",
+                active=True,
+                load=0,
+                stock_count=0,
+            )
+            db.add(own_store)
+            db.commit()
+            db.refresh(own_store)
+            _ensure_inventory_baseline(db)
+        target_store_id = own_store.id
+
+    q = (
+        db.query(PharmacyStock, PharmacyStore, Medicine)
+        .join(PharmacyStore, PharmacyStore.id == PharmacyStock.pharmacy_store_id)
+        .join(Medicine, Medicine.id == PharmacyStock.medicine_id)
+    )
+    if target_store_id:
+        q = q.filter(PharmacyStock.pharmacy_store_id == target_store_id)
+    rows = q.order_by(PharmacyStore.node_id.asc(), Medicine.name.asc()).all()
+    return [
+        PharmacyStockOut(
+            pharmacy_store_id=store.id,
+            pharmacy_store_name=store.name,
+            medicine_id=med.id,
+            medicine_name=med.name,
+            pzn=med.pzn,
+            price=med.price,
+            quantity=row.quantity or 0,
+            updated_at=row.updated_at,
+        )
+        for row, store, med in rows
+    ]
+
+
 @router.get("/stock-breakdown")
 def stock_breakdown(
     current_user: User = Depends(get_current_user),
@@ -117,16 +232,9 @@ def stock_breakdown(
     meds = db.query(Medicine).order_by(Medicine.name.asc()).all()
     warehouse_rows = db.query(WarehouseStock).all()
     warehouse_map = {r.medicine_id: r.quantity for r in warehouse_rows}
-    dispatched = (
-        db.query(WarehouseTransfer)
-        .filter(
-            WarehouseTransfer.direction == TransferDirection.warehouse_to_pharmacy,
-            WarehouseTransfer.status == TransferStatus.dispatched,
-        )
-        .all()
-    )
+    pharmacy_rows = db.query(PharmacyStock).all()
     pharmacy_totals: dict[int, int] = {}
-    for row in dispatched:
+    for row in pharmacy_rows:
         pharmacy_totals[row.medicine_id] = pharmacy_totals.get(row.medicine_id, 0) + (row.quantity or 0)
     return [
         {
@@ -359,10 +467,15 @@ def list_transfers(
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid transfer direction")
     if current_user.role == "pharmacy_store":
-        q = q.filter(WarehouseTransfer.direction == TransferDirection.warehouse_to_pharmacy)
+        store = _get_or_create_store_for_pharmacy_user(db, current_user)
+        q = q.filter(
+            WarehouseTransfer.direction == TransferDirection.warehouse_to_pharmacy,
+            WarehouseTransfer.pharmacy_store_id == store.id,
+        )
     rows = q.order_by(WarehouseTransfer.created_at.desc()).limit(500).all()
     out: list[WarehouseTransferOut] = []
     for row in rows:
+        creator_name, creator_role = _creator_meta(db, row.created_by_user_id)
         out.append(
             WarehouseTransferOut(
                 id=row.id,
@@ -375,6 +488,8 @@ def list_transfers(
                 pharmacy_store_name=row.pharmacy_store.name if row.pharmacy_store else None,
                 note=row.note,
                 created_by_user_id=row.created_by_user_id,
+                created_by_user_name=creator_name,
+                created_by_user_role=creator_role,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
             )
@@ -421,6 +536,8 @@ def admin_send_to_warehouse(
         pharmacy_store_name=None,
         note=tx.note,
         created_by_user_id=tx.created_by_user_id,
+        created_by_user_name=current_user.name,
+        created_by_user_role=current_user.role,
         created_at=tx.created_at,
         updated_at=tx.updated_at,
     )
@@ -498,6 +615,52 @@ def warehouse_send_to_pharmacy(
         pharmacy_store_name=store.name,
         note=tx.note,
         created_by_user_id=tx.created_by_user_id,
+        created_by_user_name=current_user.name,
+        created_by_user_role=current_user.role,
+        created_at=tx.created_at,
+        updated_at=tx.updated_at,
+    )
+
+
+@router.post("/transfers/pharmacy-request", response_model=WarehouseTransferOut)
+def pharmacy_request_from_warehouse(
+    data: AdminToWarehouseCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if current_user.role != "pharmacy_store":
+        raise HTTPException(status_code=403, detail="Only pharmacy can request stock from warehouse")
+    if data.quantity <= 0:
+        raise HTTPException(status_code=400, detail="Quantity must be positive")
+    med = db.query(Medicine).filter(Medicine.id == data.medicine_id).first()
+    if not med:
+        raise HTTPException(status_code=404, detail="Medicine not found")
+    store = _get_or_create_store_for_pharmacy_user(db, current_user)
+    tx = WarehouseTransfer(
+        medicine_id=med.id,
+        quantity=data.quantity,
+        direction=TransferDirection.warehouse_to_pharmacy,
+        status=TransferStatus.requested,
+        pharmacy_store_id=store.id,
+        note=data.note or "Requested by pharmacy",
+        created_by_user_id=current_user.id,
+    )
+    db.add(tx)
+    db.commit()
+    db.refresh(tx)
+    return WarehouseTransferOut(
+        id=tx.id,
+        medicine_id=tx.medicine_id,
+        medicine_name=med.name,
+        quantity=tx.quantity,
+        direction=tx.direction.value,
+        status=tx.status.value,
+        pharmacy_store_id=tx.pharmacy_store_id,
+        pharmacy_store_name=store.name,
+        note=tx.note,
+        created_by_user_id=tx.created_by_user_id,
+        created_by_user_name=current_user.name,
+        created_by_user_role=current_user.role,
         created_at=tx.created_at,
         updated_at=tx.updated_at,
     )
@@ -532,11 +695,22 @@ def update_transfer_status(
     elif next_status not in allowed.get(row.status, set()):
         raise HTTPException(status_code=400, detail=f"Invalid transition from {row.status.value} to {next_status.value}")
     else:
+        # Pharmacy-initiated requests reserve warehouse stock when picking starts.
+        creator_name, creator_role = _creator_meta(db, row.created_by_user_id)
+        if row.status == TransferStatus.requested and next_status == TransferStatus.picking and creator_role == "pharmacy_store":
+            w_stock = _get_or_create_stock(db, row.medicine_id)
+            if (w_stock.quantity or 0) < (row.quantity or 0):
+                med_name = row.medicine.name if row.medicine else f"Medicine #{row.medicine_id}"
+                raise HTTPException(status_code=400, detail=f"Insufficient warehouse stock for {med_name}")
+            w_stock.quantity = (w_stock.quantity or 0) - (row.quantity or 0)
         row.status = next_status
         if next_status == TransferStatus.dispatched and row.pharmacy_store:
             row.pharmacy_store.stock_count = (row.pharmacy_store.stock_count or 0) + row.quantity
+            p_stock = _get_or_create_pharmacy_stock(db, row.pharmacy_store_id, row.medicine_id)
+            p_stock.quantity = (p_stock.quantity or 0) + (row.quantity or 0)
     db.commit()
     db.refresh(row)
+    creator_name, creator_role = _creator_meta(db, row.created_by_user_id)
     return WarehouseTransferOut(
         id=row.id,
         medicine_id=row.medicine_id,
@@ -548,6 +722,8 @@ def update_transfer_status(
         pharmacy_store_name=row.pharmacy_store.name if row.pharmacy_store else None,
         note=row.note,
         created_by_user_id=row.created_by_user_id,
+        created_by_user_name=creator_name,
+        created_by_user_role=creator_role,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )

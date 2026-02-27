@@ -6,17 +6,19 @@ import { useAuth } from '../../context/AuthContext';
 export default function PharmacyInventory() {
   const { token, apiBase } = useAuth();
   const [search,setSearch]=useState("");
-  const [transfers, setTransfers] = useState([]);
+  const [stocks, setStocks] = useState([]);
+  const [requestForm, setRequestForm] = useState({ medicine_id: "", quantity: "10", note: "" });
+  const [requestMsg, setRequestMsg] = useState("");
   useEffect(() => {
     if (!token) return;
     const load = async () => {
       try {
-        const res = await fetch(`${apiBase}/warehouse/transfers?direction=warehouse_to_pharmacy`, {
+        const res = await fetch(`${apiBase}/warehouse/pharmacy-stock`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (!res.ok) return;
         const data = await res.json();
-        setTransfers(Array.isArray(data) ? data : []);
+        setStocks(Array.isArray(data) ? data : []);
       } catch (_) {}
     };
     load();
@@ -24,25 +26,60 @@ export default function PharmacyInventory() {
     return () => window.clearInterval(timer);
   }, [token, apiBase]);
   const medicines = useMemo(() => {
-    const dispatched = transfers.filter((x) => x.status === "dispatched");
-    const map = {};
-    dispatched.forEach((x) => {
-      const key = `${x.pharmacy_store_id || "na"}-${x.medicine_id}`;
-      if (!map[key]) {
-        map[key] = {
-          id: key,
-          name: x.medicine_name,
-          stock: 0,
-          price: 0,
-          pharmacy: x.pharmacy_store_name || "-",
-        };
-      }
-      map[key].stock += Number(x.quantity || 0);
-    });
-    return Object.values(map);
-  }, [transfers]);
+    return stocks.map((x) => ({
+      id: `${x.pharmacy_store_id}-${x.medicine_id}`,
+      medicine_id: x.medicine_id,
+      name: x.medicine_name,
+      stock: Number(x.quantity || 0),
+      price: Number(x.price || 0),
+      pharmacy: x.pharmacy_store_name || "-",
+    }));
+  }, [stocks]);
   const fd=search?medicines.filter(m=>m.name.toLowerCase().includes(search.toLowerCase())):medicines;
-  return (<div><PageHeader title="Pharmacy Inventory" subtitle="Received from warehouse dispatches" actions={<Btn variant="secondary" size="sm"><SI2 size={14}/>Scan</Btn>}/>
+  const requestFromWarehouse = async () => {
+    if (!token || !requestForm.medicine_id || Number(requestForm.quantity) <= 0) {
+      setRequestMsg("Choose medicine and valid quantity");
+      return;
+    }
+    setRequestMsg("");
+    try {
+      const res = await fetch(`${apiBase}/warehouse/transfers/pharmacy-request`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          medicine_id: Number(requestForm.medicine_id),
+          quantity: Number(requestForm.quantity),
+          note: requestForm.note.trim() || null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setRequestMsg(data?.detail || "Unable to request medicine");
+      } else {
+        setRequestMsg("Request sent to warehouse");
+        setRequestForm({ medicine_id: "", quantity: "10", note: "" });
+      }
+    } catch (_) {
+      setRequestMsg("Network error while sending request");
+    }
+  };
+  return (<div><PageHeader title="Pharmacy Inventory" subtitle="Your pharmacy stock" actions={<Btn variant="secondary" size="sm"><SI2 size={14}/>Scan</Btn>}/>
+  <div style={{background:T.white,border:"1px solid "+T.gray200,borderRadius:8,padding:12,marginBottom:12}}>
+    <div style={{fontSize:12,color:T.gray700,fontWeight:600,marginBottom:8}}>Request medicine from warehouse</div>
+    <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 2fr auto",gap:8}}>
+      <select value={requestForm.medicine_id} onChange={(e)=>setRequestForm({...requestForm, medicine_id:e.target.value})} style={{padding:"9px",border:`1px solid ${T.gray200}`,borderRadius:8}}>
+        <option value="">Select medicine</option>
+        {medicines.map((m)=><option key={m.id} value={m.medicine_id}>{m.name} (current: {m.stock})</option>)}
+      </select>
+      <input type="number" value={requestForm.quantity} onChange={(e)=>setRequestForm({...requestForm, quantity:e.target.value})} placeholder="Qty" style={{padding:"9px",border:`1px solid ${T.gray200}`,borderRadius:8}} />
+      <input value={requestForm.note} onChange={(e)=>setRequestForm({...requestForm, note:e.target.value})} placeholder="Reason / note" style={{padding:"9px",border:`1px solid ${T.gray200}`,borderRadius:8}} />
+      <Btn variant="primary" size="sm" onClick={requestFromWarehouse}>Request</Btn>
+    </div>
+    {requestMsg ? <div style={{marginTop:8,fontSize:12,color:requestMsg === "Request sent to warehouse" ? T.green : T.red}}>{requestMsg}</div> : null}
+  </div>
   <div style={{marginBottom:16}}><SearchInput value={search} onChange={setSearch} placeholder="Search..."/></div>
   <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:10}}>
     {fd.slice(0,50).map(m=>(

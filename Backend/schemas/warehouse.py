@@ -36,6 +36,8 @@ class WarehouseTransferOut(BaseModel):
     pharmacy_store_name: str | None = None
     note: str | None = None
     created_by_user_id: int
+    created_by_user_name: str | None = None
+    created_by_user_role: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -68,3 +70,14 @@ class WarehouseMedicineUpdate(BaseModel):
     description: str | None = None
     image_url: str | None = None
     warehouse_stock: int | None = None
+
+
+class PharmacyStockOut(BaseModel):
+    pharmacy_store_id: int
+    pharmacy_store_name: str
+    medicine_id: int
+    medicine_name: str
+    pzn: str
+    price: float
+    quantity: int
+    updated_at: datetime | None = None
