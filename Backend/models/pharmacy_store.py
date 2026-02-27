@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Float
 from sqlalchemy.sql import func
 
 from database import Base
@@ -11,6 +11,8 @@ class PharmacyStore(Base):
     node_id = Column(String(30), unique=True, nullable=False, index=True)
     name = Column(String(120), nullable=False)
     location = Column(String(180), nullable=False)
+    location_lat = Column(Float, nullable=True)
+    location_lng = Column(Float, nullable=True)
     active = Column(Boolean, default=True)
     load = Column(Integer, default=0)
     stock_count = Column(Integer, default=0)

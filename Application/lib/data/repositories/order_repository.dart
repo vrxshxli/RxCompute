@@ -21,11 +21,17 @@ class OrderRepository {
     required List<Map<String, dynamic>> items,
     String? pharmacy,
     String? paymentMethod,
+    String? deliveryAddress,
+    double? deliveryLat,
+    double? deliveryLng,
   }) async {
     final res = await _api.dio.post('${ApiConfig.orders}/', data: {
       'items': items,
       if (pharmacy != null) 'pharmacy': pharmacy,
       if (paymentMethod != null) 'payment_method': paymentMethod,
+      if (deliveryAddress != null) 'delivery_address': deliveryAddress,
+      if (deliveryLat != null) 'delivery_lat': deliveryLat,
+      if (deliveryLng != null) 'delivery_lng': deliveryLng,
     });
     return OrderModel.fromJson(res.data);
   }

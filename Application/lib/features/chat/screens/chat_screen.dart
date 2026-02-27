@@ -412,7 +412,7 @@ class _CS extends State<ChatScreen> {
                 Text(m.text, style: GoogleFonts.outfit(color: r.text2, fontSize: 12, fontWeight: FontWeight.w600)),
                 const SizedBox(height: 14),
                 if (m.medicines != null) ...m.medicines!.map((med) => _MC(med: med)),
-                ...m.warnings!.map((w) => Container(
+                ...(m.warnings ?? const <SafetyWarning>[]).map((w) => Container(
                       padding: const EdgeInsets.all(14),
                       decoration: BoxDecoration(color: r.errBg, borderRadius: BorderRadius.circular(10), border: const Border(left: BorderSide(color: C.err, width: 3))),
                       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -427,6 +427,11 @@ class _CS extends State<ChatScreen> {
                         RxBtn(label: 'Upload Prescription', icon: Icons.upload_rounded, color: C.err, onPressed: _pickAndUploadPrescription),
                       ]),
                     )),
+                if ((m.warnings ?? const <SafetyWarning>[]).isEmpty)
+                  Text(
+                    'No warning details available. Please re-run the safety check.',
+                    style: GoogleFonts.outfit(color: r.text3, fontSize: 12),
+                  ),
               ]),
             ),
           ),

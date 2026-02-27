@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -9,6 +10,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/rx_theme_ext.dart';
 import '../../../data/providers/api_provider.dart';
+import '../../../data/models/notification_model.dart';
 import '../../../data/repositories/medicine_repository.dart';
 import '../../../data/repositories/notification_repository.dart';
 import '../../../data/repositories/user_repository.dart';
@@ -23,7 +25,7 @@ class MainShell extends StatefulWidget {
   State<MainShell> createState() => _MS();
 }
 
-class _MS extends State<MainShell> {
+class _MS extends State<MainShell> with WidgetsBindingObserver {
   int _i = 0;
   final _screens = const [HomeTab(), ChatScreen(), MedicineBrainScreen(), ProfileScreen()];
   final UserRepository _userRepository = UserRepository();
@@ -41,12 +43,17 @@ class _MS extends State<MainShell> {
   String _speechLocale = 'en_IN';
   String _voiceLanguage = 'en-IN';
   String _lastHeard = '';
+  Timer? _notifPoller;
+  int _lastSeenNotifId = 0;
+  bool _didInitialNotificationSpeak = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _initPushToken();
     _initVoiceAssistant();
+    _startNotificationVoiceFeed();
   }
 
   Future<void> _initPushToken() async {
@@ -71,14 +78,11 @@ class _MS extends State<MainShell> {
         if (!mounted) return;
         final title = message.notification?.title ?? 'RxCompute';
         final body = message.notification?.body ?? 'New update available';
-        final isSafety = title.toLowerCase().contains('safety');
-        _audioPlayer.play(AssetSource('sounds/rx_tune.wav'));
-        if (isSafety) {
-          Future.delayed(const Duration(milliseconds: 900), () {
-            _audioPlayer.play(AssetSource('sounds/rx_tune.wav'));
-          });
-          _tts.speak('Safety alert. $title. $body');
-        }
+        final lowered = '$title $body'.toLowerCase();
+        final isSafety = lowered.contains('safety');
+        final isRefill = lowered.contains('refill');
+        final isOrder = lowered.contains('order');
+        _announceMessage(title: title, body: body, isSafety: isSafety, isRefill: isRefill, isOrder: isOrder);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('$title: $body')),
         );
@@ -90,6 +94,99 @@ class _MS extends State<MainShell> {
     } catch (e) {
       debugPrint('⚠️ Push init failed: $e');
     }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _pollAndSpeakNotifications(forceSpeakRefillOnOpen: true);
+    }
+  }
+
+  Future<void> _startNotificationVoiceFeed() async {
+    await _pollAndSpeakNotifications(forceSpeakRefillOnOpen: true);
+    _notifPoller?.cancel();
+    _notifPoller = Timer.periodic(const Duration(seconds: 12), (_) {
+      _pollAndSpeakNotifications();
+    });
+  }
+
+  Future<void> _pollAndSpeakNotifications({bool forceSpeakRefillOnOpen = false}) async {
+    try {
+      final list = await _notificationRepository.getNotifications();
+      if (list.isEmpty) return;
+      final sorted = [...list]..sort((a, b) => b.id.compareTo(a.id));
+      final maxId = sorted.first.id;
+
+      if (!_didInitialNotificationSpeak || forceSpeakRefillOnOpen) {
+        _didInitialNotificationSpeak = true;
+        final latestRefill = sorted.cast<NotificationModel?>().firstWhere(
+              (n) => n?.type == NotificationType.refill,
+              orElse: () => null,
+            );
+        final latestOrder = sorted.cast<NotificationModel?>().firstWhere(
+              (n) => n?.type == NotificationType.order,
+              orElse: () => null,
+            );
+        if (latestRefill != null) {
+          _announceFromModel(latestRefill, highPriority: true);
+        }
+        if (latestOrder != null && latestOrder.id > _lastSeenNotifId) {
+          _announceFromModel(latestOrder);
+        }
+        _lastSeenNotifId = max(_lastSeenNotifId, maxId);
+        return;
+      }
+
+      final fresh = sorted.where((n) => n.id > _lastSeenNotifId).toList().reversed.toList();
+      for (final n in fresh.take(4)) {
+        _announceFromModel(n);
+      }
+      _lastSeenNotifId = max(_lastSeenNotifId, maxId);
+    } catch (_) {}
+  }
+
+  void _announceFromModel(NotificationModel n, {bool highPriority = false}) {
+    final isSafety = n.type == NotificationType.safety;
+    final isRefill = n.type == NotificationType.refill;
+    final isOrder = n.type == NotificationType.order;
+    _announceMessage(
+      title: n.title,
+      body: n.body,
+      isSafety: isSafety,
+      isRefill: isRefill,
+      isOrder: isOrder,
+      highPriority: highPriority,
+    );
+  }
+
+  void _announceMessage({
+    required String title,
+    required String body,
+    bool isSafety = false,
+    bool isRefill = false,
+    bool isOrder = false,
+    bool highPriority = false,
+  }) {
+    _audioPlayer.play(AssetSource('sounds/rx_tune.wav'));
+    if (isSafety || highPriority) {
+      Future.delayed(const Duration(milliseconds: 900), () {
+        _audioPlayer.play(AssetSource('sounds/rx_tune.wav'));
+      });
+    }
+    if (isSafety) {
+      _speak('Safety alert. $title. $body');
+      return;
+    }
+    if (isRefill) {
+      _speak('Refill reminder. $title. $body');
+      return;
+    }
+    if (isOrder) {
+      _speak('Order update. $title. $body');
+      return;
+    }
+    _speak('$title. $body');
   }
 
   Future<void> _initVoiceAssistant() async {
@@ -234,9 +331,11 @@ class _MS extends State<MainShell> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _tokenSub?.cancel();
     _onMessageSub?.cancel();
     _onMessageOpenSub?.cancel();
+    _notifPoller?.cancel();
     _speech.cancel();
     _audioPlayer.dispose();
     _tts.stop();

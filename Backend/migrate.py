@@ -105,6 +105,9 @@ def migrate():
                 ("last_status_updated_by_role", "VARCHAR(40)"),
                 ("last_status_updated_by_name", "VARCHAR(120)"),
                 ("last_status_updated_at", "TIMESTAMP WITH TIME ZONE"),
+                ("delivery_address", "VARCHAR(255)"),
+                ("delivery_lat", "DOUBLE PRECISION"),
+                ("delivery_lng", "DOUBLE PRECISION"),
             ]
             for col_name, col_type in order_migrations:
                 if col_name not in order_cols:
@@ -122,6 +125,21 @@ def migrate():
                 print("  ✓ Added column: medicines.image_url")
             else:
                 print("  · Column already exists: medicines.image_url")
+
+            # 5b. Add location columns to 'pharmacy_stores' table
+            ps_cols = get_existing_columns(conn, "pharmacy_stores")
+            if "location_lat" not in ps_cols:
+                conn.execute(text("ALTER TABLE pharmacy_stores ADD COLUMN location_lat DOUBLE PRECISION"))
+                conn.commit()
+                print("  ✓ Added column: pharmacy_stores.location_lat")
+            else:
+                print("  · Column already exists: pharmacy_stores.location_lat")
+            if "location_lng" not in ps_cols:
+                conn.execute(text("ALTER TABLE pharmacy_stores ADD COLUMN location_lng DOUBLE PRECISION"))
+                conn.commit()
+                print("  ✓ Added column: pharmacy_stores.location_lng")
+            else:
+                print("  · Column already exists: pharmacy_stores.location_lng")
 
             # 6. Add missing columns to 'notifications' table
             notif_cols = get_existing_columns(conn, "notifications")

@@ -94,6 +94,9 @@ class OrderModel {
   final double total;
   final String? pharmacy;
   final String? paymentMethod;
+  final String? deliveryAddress;
+  final double? deliveryLat;
+  final double? deliveryLng;
   final List<OrderItemModel> items;
   final DateTime createdAt;
 
@@ -105,6 +108,9 @@ class OrderModel {
     required this.total,
     this.pharmacy,
     this.paymentMethod,
+    this.deliveryAddress,
+    this.deliveryLat,
+    this.deliveryLng,
     this.items = const [],
     required this.createdAt,
   });
@@ -117,6 +123,9 @@ class OrderModel {
         total: (json['total'] as num).toDouble(),
         pharmacy: json['pharmacy'],
         paymentMethod: json['payment_method'],
+        deliveryAddress: json['delivery_address'],
+        deliveryLat: (json['delivery_lat'] as num?)?.toDouble(),
+        deliveryLng: (json['delivery_lng'] as num?)?.toDouble(),
         items: (json['items'] as List?)
                 ?.map((e) => OrderItemModel.fromJson(e))
                 .toList() ??

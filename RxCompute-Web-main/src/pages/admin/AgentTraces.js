@@ -82,6 +82,9 @@ export default function AdminAgentTraces() {
         <div style={{ fontSize:11, color:T.gray600 }}>
           Target user: {l.target_user_name || l.target_user_email || (l.target_user_id ? `User #${l.target_user_id}` : '-')} {l.target_user_role ? `(${l.target_user_role})` : ''}
         </div>
+        <div style={{ fontSize:11, color:T.gray500 }}>
+          Phase: {l?.metadata?.phase || '-'} · Triggered by: {l?.metadata?.triggered_by_role || '-'} {l?.metadata?.triggered_by_user_id ? `#${l.metadata.triggered_by_user_id}` : ''}
+        </div>
         {Array.isArray(l?.metadata?.ocr_details) && l.metadata.ocr_details.length ? (
           <div style={{ border:`1px solid ${T.gray200}`, borderRadius:8, padding:10, background:T.gray50 }}>
             {l.metadata.ocr_details.map((d, idx) => (

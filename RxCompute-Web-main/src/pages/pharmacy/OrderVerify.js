@@ -8,6 +8,9 @@ export default function PharmacyVerify() {
   const [orders, setOrders] = useState([]);
   const [users, setUsers] = useState([]);
   const [activeOrderId, setActiveOrderId] = useState(null);
+  const [safetySummary, setSafetySummary] = useState('');
+  const [safetyBlocked, setSafetyBlocked] = useState(false);
+  const [checkingSafety, setCheckingSafety] = useState(false);
 
   const load = async () => {
     if (!token) return;
@@ -44,6 +47,44 @@ export default function PharmacyVerify() {
   const o = orders.find((x) => x.id === activeOrderId) || orders[0];
   const p = o ? userMap[o.user_id] : null;
 
+  const runSafetyCheck = async (order) => {
+    if (!token || !order) return;
+    setCheckingSafety(true);
+    try {
+      const payload = {
+        items: (order.items || []).map((it) => ({
+          medicine_id: it.medicine_id,
+          name: it.name,
+          quantity: it.quantity,
+          dosage_instruction: it.dosage_instruction || '',
+          strips_count: it.strips_count || 1,
+          prescription_file: it.prescription_file || null,
+        })),
+        message: `Pharmacy verify order ${order.order_uid}`,
+      };
+      const res = await fetch(`${apiBase}/safety/check`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      setSafetySummary((data?.safety_summary || '').toString());
+      setSafetyBlocked(Boolean(data?.blocked));
+    } catch (_) {
+      setSafetySummary('Safety check failed');
+      setSafetyBlocked(true);
+    } finally {
+      setCheckingSafety(false);
+    }
+  };
+
+  useEffect(() => {
+    if (o) runSafetyCheck(o);
+  }, [activeOrderId, token, apiBase, orders.length]);
+
   const setStatus = async (status) => {
     if (!token || !o) return;
     await fetch(`${apiBase}/orders/${o.id}/status`, {
@@ -75,8 +116,8 @@ export default function PharmacyVerify() {
       <div style={{background:T.white,border:"1px solid "+T.gray200,borderRadius:10,padding:20}}><div style={{fontWeight:600,fontSize:14,color:T.gray900,marginBottom:12}}>Items</div>{(o.items || []).map((it,i)=><div key={i} style={{display:"flex",justifyContent:"space-between",padding:"10px 0",borderBottom:i<(o.items || []).length-1?"1px solid "+T.gray100:"none"}}><div><div style={{fontWeight:500,color:T.gray800}}>{it.name}</div><div style={{fontSize:11,color:T.gray400}}>Qty: {it.quantity} · ₹ {Number(it.price || 0).toFixed(2)} {it.rx_required ? "· Rx" : ""}</div>{it.prescription_file ? <div style={{marginTop:6}}><a href={resolveFileUrl(it.prescription_file)} target="_blank" rel="noreferrer" style={{fontSize:12,color:T.blue}}>View Prescription</a></div> : null}</div>{it.prescription_file && /\.(png|jpe?g|webp)$/i.test(it.prescription_file) ? <img src={resolveFileUrl(it.prescription_file)} alt="Prescription" style={{width:80,height:80,objectFit:"cover",borderRadius:8,border:`1px solid ${T.gray200}`}} /> : null}</div>)}<div style={{display:"flex",justifyContent:"flex-end",paddingTop:12,fontSize:15,fontWeight:700}}>₹ {Number(o.total || 0).toFixed(2)}</div></div>
     </div>
     <div>
-      <div style={{background:T.navy900,borderRadius:10,padding:20,color:T.gray300,marginBottom:16}}><div style={{fontWeight:600,fontSize:14,color:T.white,marginBottom:16,display:"flex",alignItems:"center",gap:8}}><Zap size={16} color={T.yellow}/>AI Analysis</div>{[{i:"OK",t:`Prescription: ${((o.items || []).some(it=>it.rx_required)) ? "required" : "not required"}`,c:T.green},{i:"OK",t:`Items: ${(o.items || []).length}`,c:T.green},{i:"OK",t:`Current status: ${o.status}`,c:T.green},{i:">>",t:"Recommendation: APPROVE",c:T.blue}].map((x,j)=><div key={j} style={{display:"flex",gap:10,marginBottom:12,fontSize:13}}><span style={{color:x.c,fontWeight:700}}>{x.i}</span><span style={{color:x.c}}>{x.t}</span></div>)}<Btn variant="ghost" size="sm" style={{color:T.blue,marginTop:8}}><ExternalLink size={12}/>Langfuse</Btn></div>
-      <div style={{display:"flex",flexDirection:"column",gap:8}}><Btn variant="success" size="md" style={{width:"100%",justifyContent:"center"}} onClick={() => setStatus("verified")}><CheckCircle size={16}/>Approve</Btn><Btn variant="secondary" size="md" style={{width:"100%",justifyContent:"center",color:T.yellow}} onClick={() => setStatus("verified")}><AlertTriangle size={16}/>Approve with Note</Btn><Btn variant="secondary" size="md" style={{width:"100%",justifyContent:"center",color:T.red}} onClick={() => setStatus("cancelled")}><XCircle size={16}/>Reject</Btn></div>
+      <div style={{background:T.navy900,borderRadius:10,padding:20,color:T.gray300,marginBottom:16}}><div style={{fontWeight:600,fontSize:14,color:T.white,marginBottom:16,display:"flex",alignItems:"center",gap:8}}><Zap size={16} color={T.yellow}/>AI Analysis</div>{[{i:safetyBlocked?"NO":"OK",t:`Prescription: ${((o.items || []).some(it=>it.rx_required)) ? "required" : "not required"}`,c:safetyBlocked?T.red:T.green},{i:"OK",t:`Items: ${(o.items || []).length}`,c:T.green},{i:"OK",t:`Current status: ${o.status}`,c:T.green},{i:checkingSafety?"..":(safetyBlocked?"XX":">>"),t:checkingSafety?"Recommendation: CHECKING":"Recommendation: " + (safetyBlocked ? "REJECT" : "APPROVE"),c:safetyBlocked?T.red:T.blue}].map((x,j)=><div key={j} style={{display:"flex",gap:10,marginBottom:12,fontSize:13}}><span style={{color:x.c,fontWeight:700}}>{x.i}</span><span style={{color:x.c}}>{x.t}</span></div>)}{safetySummary ? <div style={{fontSize:11,color:safetyBlocked?T.red:T.gray300,marginTop:6}}>{safetySummary}</div> : null}<Btn variant="ghost" size="sm" style={{color:T.blue,marginTop:8}}><ExternalLink size={12}/>Langfuse</Btn></div>
+      <div style={{display:"flex",flexDirection:"column",gap:8}}><Btn variant="success" size="md" style={{width:"100%",justifyContent:"center"}} disabled={checkingSafety || safetyBlocked} onClick={() => setStatus("verified")}><CheckCircle size={16}/>Approve</Btn><Btn variant="secondary" size="md" style={{width:"100%",justifyContent:"center",color:T.yellow}} disabled={checkingSafety || safetyBlocked} onClick={() => setStatus("verified")}><AlertTriangle size={16}/>Approve with Note</Btn><Btn variant="secondary" size="md" style={{width:"100%",justifyContent:"center",color:T.red}} onClick={() => setStatus("cancelled")}><XCircle size={16}/>Reject</Btn></div>
     </div>
   </div></div>);
 }

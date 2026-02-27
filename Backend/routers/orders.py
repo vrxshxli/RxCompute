@@ -1,7 +1,9 @@
 import uuid
 from datetime import datetime
+from math import atan2, cos, radians, sin, sqrt
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -31,6 +33,40 @@ def _generate_order_uid() -> str:
     now = datetime.utcnow().strftime("%Y%m%d")
     short = uuid.uuid4().hex[:6].upper()
     return f"ORD-{now}-{short}"
+
+
+def _resolve_pharmacy_node_for_user(user: User, db: Session) -> str:
+    node_id = f"PH-U{user.id:03d}"
+    store = db.query(PharmacyStore).filter(PharmacyStore.node_id == node_id).first()
+    return store.node_id if store else node_id
+
+
+def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    r = 6371.0
+    d_lat = radians(lat2 - lat1)
+    d_lon = radians(lon2 - lon1)
+    a = sin(d_lat / 2) ** 2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(d_lon / 2) ** 2
+    c = 2 * atan2(sqrt(a), sqrt(1 - a))
+    return r * c
+
+
+def _find_nearby_pharmacy_node(db: Session, user_lat: float | None, user_lng: float | None) -> str | None:
+    active = db.query(PharmacyStore).filter(PharmacyStore.active == True).all()
+    if not active:
+        return None
+    if user_lat is None or user_lng is None:
+        # No user coords: choose least loaded active store.
+        fallback = sorted(active, key=lambda s: (s.load or 0, s.id))[0]
+        return fallback.node_id
+    with_coords = [s for s in active if s.location_lat is not None and s.location_lng is not None]
+    if not with_coords:
+        fallback = sorted(active, key=lambda s: (s.load or 0, s.id))[0]
+        return fallback.node_id
+    nearest = min(
+        with_coords,
+        key=lambda s: (_haversine_km(user_lat, user_lng, float(s.location_lat), float(s.location_lng)), s.load or 0),
+    )
+    return nearest.node_id
 
 
 def _broadcast_safety_alert(db: Session, title: str, body: str, actor: User | None = None) -> None:
@@ -98,9 +134,13 @@ def _publish_safety_trace_for_admins(
 
 
 def _auto_review_pending_for_pharmacy(db: Session, pharmacy_user: User) -> None:
+    pharmacy_node = _resolve_pharmacy_node_for_user(pharmacy_user, db)
     pending_orders = (
         db.query(Order)
-        .filter(Order.status == OrderStatus.pending)
+        .filter(
+            Order.status == OrderStatus.pending,
+            or_(Order.pharmacy == pharmacy_node, Order.pharmacy.is_(None)),
+        )
         .order_by(Order.created_at.asc())
         .limit(100)
         .all()
@@ -229,6 +269,13 @@ def list_orders(
         raise HTTPException(status_code=403, detail="Warehouse does not have access to customer orders")
     if current_user.role == "pharmacy_store":
         _auto_review_pending_for_pharmacy(db, current_user)
+        pharmacy_node = _resolve_pharmacy_node_for_user(current_user, db)
+        return (
+            db.query(Order)
+            .filter(or_(Order.pharmacy == pharmacy_node, Order.pharmacy.is_(None)))
+            .order_by(Order.created_at.desc())
+            .all()
+        )
     if current_user.role in STAFF_ROLES:
         return db.query(Order).order_by(Order.created_at.desc()).all()
     return (
@@ -249,7 +296,10 @@ def get_order(
     if current_user.role == "warehouse":
         raise HTTPException(status_code=403, detail="Warehouse does not have access to customer orders")
     query = db.query(Order).filter(Order.id == order_id)
-    if current_user.role not in STAFF_ROLES:
+    if current_user.role == "pharmacy_store":
+        pharmacy_node = _resolve_pharmacy_node_for_user(current_user, db)
+        query = query.filter(or_(Order.pharmacy == pharmacy_node, Order.pharmacy.is_(None)))
+    elif current_user.role not in STAFF_ROLES:
         query = query.filter(Order.user_id == current_user.id)
     order = query.first()
     if not order:
@@ -335,13 +385,20 @@ def create_order(
         )
 
     total = sum(item.price * item.quantity for item in data.items)
+    delivery_address = (data.delivery_address or current_user.location_text or "").strip() or None
+    delivery_lat = data.delivery_lat if data.delivery_lat is not None else current_user.location_lat
+    delivery_lng = data.delivery_lng if data.delivery_lng is not None else current_user.location_lng
+    assigned_pharmacy = data.pharmacy or _find_nearby_pharmacy_node(db, delivery_lat, delivery_lng)
     order = Order(
         order_uid=_generate_order_uid(),
         user_id=current_user.id,
         status=OrderStatus.pending,
         total=total,
-        pharmacy=data.pharmacy,
+        pharmacy=assigned_pharmacy,
         payment_method=data.payment_method,
+        delivery_address=delivery_address,
+        delivery_lat=delivery_lat,
+        delivery_lng=delivery_lng,
     )
     db.add(order)
     db.flush()
@@ -435,10 +492,17 @@ def update_order_status(
 
     # Pharmacy must approve first. Admin handles downstream logistics.
     if current_user.role == "pharmacy_store":
+        pharmacy_node = _resolve_pharmacy_node_for_user(current_user, db)
         if old_status != OrderStatus.pending.value:
             raise HTTPException(status_code=403, detail="Pharmacy can approve only pending orders")
         if new_status not in {OrderStatus.verified, OrderStatus.cancelled}:
             raise HTTPException(status_code=403, detail="Pharmacy can set only VERIFIED or CANCELLED")
+        if order.pharmacy and order.pharmacy != pharmacy_node:
+            raise HTTPException(status_code=403, detail=f"Order is assigned to pharmacy {order.pharmacy}")
+        if not order.pharmacy:
+            order.pharmacy = _find_nearby_pharmacy_node(db, order.delivery_lat, order.delivery_lng) or pharmacy_node
+        if order.pharmacy != pharmacy_node and new_status == OrderStatus.verified:
+            raise HTTPException(status_code=403, detail=f"Nearest assigned pharmacy is {order.pharmacy}")
         if new_status == OrderStatus.verified:
             # Pharmacy verification must pass safety checks, including prescription quality.
             verify_payload = [

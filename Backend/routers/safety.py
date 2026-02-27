@@ -21,6 +21,8 @@ class SafetyItem(BaseModel):
     medicine_id: int
     name: str = ""
     quantity: int = 1
+    dosage_instruction: str | None = None
+    strips_count: int | None = None
     prescription_file: str | None = None
 
 class SafetyCheckRequest(BaseModel):
@@ -65,6 +67,8 @@ def run_safety_check(
             "medicine_id": it.medicine_id,
             "name": it.name,
             "quantity": it.quantity,
+            "dosage_instruction": it.dosage_instruction,
+            "strips_count": it.strips_count,
             "prescription_file": it.prescription_file,
         }
         for it in data.items

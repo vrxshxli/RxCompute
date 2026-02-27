@@ -329,7 +329,7 @@ def _evaluate_rules(
             )
 
         strips_to_check = strips_count if isinstance(strips_count, int) and strips_count > 0 else qty
-        if strips_to_check > 1 and not _prescription_mentions_strips(extracted_text, strips_to_check):
+        if strips_to_check >= 1 and not _prescription_mentions_strips(extracted_text, strips_to_check):
             return SafetyCheckResult(
                 medicine_id=med.id,
                 medicine_name=name,
@@ -339,6 +339,19 @@ def _evaluate_rules(
                 detail={
                     "confidence": ocr_decision.get("confidence"),
                     "indicators": {**ocr_decision.get("indicators", {}), "strips_found": False},
+                },
+            )
+
+        if not _prescription_mentions_days(extracted_text):
+            return SafetyCheckResult(
+                medicine_id=med.id,
+                medicine_name=name,
+                status="blocked",
+                rule="prescription_days_missing",
+                message=f"{name}: prescription does not clearly mention treatment days/duration.",
+                detail={
+                    "confidence": ocr_decision.get("confidence"),
+                    "indicators": {**ocr_decision.get("indicators", {}), "days_found": False},
                 },
             )
 
@@ -717,7 +730,8 @@ def _prescription_mentions_dosage(text: str, dosage_instruction: str) -> bool:
     nums = re.findall(r"\d+", dosage_instruction or "")
     if nums and " ".join(nums) in t:
         return True
-    return False
+    tokens = [x for x in d.split() if len(x) >= 3]
+    return any(tok in t for tok in tokens)
 
 
 def _prescription_mentions_strips(text: str, strips: int) -> bool:
@@ -731,6 +745,14 @@ def _prescription_mentions_strips(text: str, strips: int) -> bool:
         f"{strips} tablets",
     ]
     return any(p in t for p in patterns)
+
+
+def _prescription_mentions_days(text: str) -> bool:
+    t = _normalize_text(text)
+    if re.search(r"\b\d+\s*(day|days|week|weeks|month|months)\b", t):
+        return True
+    # Also accept compact forms such as "x5d", "5d", "7days".
+    return bool(re.search(r"\b(x?\d+\s*d)\b", t))
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

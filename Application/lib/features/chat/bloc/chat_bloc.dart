@@ -8,6 +8,7 @@ import '../../../data/models/order_model.dart';
 import '../../../data/repositories/chat_repository.dart';
 import '../../../data/repositories/medicine_repository.dart';
 import '../../../data/repositories/order_repository.dart';
+import '../../../data/repositories/user_repository.dart';
 
 // ─── Events ──────────────────────────────────────────────
 abstract class ChatEvent extends Equatable {
@@ -95,6 +96,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   final MedicineRepository _medicineRepo = MedicineRepository();
   final OrderRepository _orderRepo = OrderRepository();
   final ChatRepository _chatRepo = ChatRepository();
+  final UserRepository _userRepo = UserRepository();
 
   static const String _chatMessagesKey = 'chat_messages_v1';
   static const String _chatLangKey = 'chat_language_v1';
@@ -627,6 +629,15 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   }
 
   Future<OrderModel> _placeOrder() async {
+    String? deliveryAddress;
+    double? deliveryLat;
+    double? deliveryLng;
+    try {
+      final profile = await _userRepo.getProfile();
+      deliveryAddress = profile.locationText;
+      deliveryLat = profile.locationLat;
+      deliveryLng = profile.locationLng;
+    } catch (_) {}
     return _orderRepo.createOrder(
       items: [
         {
@@ -640,6 +651,9 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         },
       ],
       paymentMethod: _draftPaymentMethod,
+      deliveryAddress: deliveryAddress,
+      deliveryLat: deliveryLat,
+      deliveryLng: deliveryLng,
     );
   }
 

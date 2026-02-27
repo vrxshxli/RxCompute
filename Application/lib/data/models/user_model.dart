@@ -6,6 +6,9 @@ class UserModel {
   final int? age;
   final String? gender;
   final String? email;
+  final String? locationText;
+  final double? locationLat;
+  final double? locationLng;
   final String? pushToken;
   final String? profilePicture;
   final String? allergies;
@@ -21,6 +24,9 @@ class UserModel {
     this.age,
     this.gender,
     this.email,
+    this.locationText,
+    this.locationLat,
+    this.locationLng,
     this.pushToken,
     this.profilePicture,
     this.allergies,
@@ -37,6 +43,9 @@ class UserModel {
         age: json['age'],
         gender: json['gender'],
         email: json['email'],
+        locationText: json['location_text'],
+        locationLat: (json['location_lat'] as num?)?.toDouble(),
+        locationLng: (json['location_lng'] as num?)?.toDouble(),
         pushToken: json['push_token'],
         profilePicture: json['profile_picture'],
         allergies: json['allergies'],
@@ -52,6 +61,9 @@ class UserModel {
         'age': age,
         'gender': gender,
         'email': email,
+        'location_text': locationText,
+        'location_lat': locationLat,
+        'location_lng': locationLng,
         'allergies': allergies,
         'conditions': conditions,
       };

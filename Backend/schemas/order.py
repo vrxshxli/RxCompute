@@ -16,6 +16,9 @@ class OrderCreate(BaseModel):
     items: list[OrderItemCreate]
     pharmacy: str | None = None
     payment_method: str | None = None
+    delivery_address: str | None = None
+    delivery_lat: float | None = None
+    delivery_lng: float | None = None
 
 
 class OrderItemOut(BaseModel):
@@ -41,6 +44,9 @@ class OrderOut(BaseModel):
     total: float
     pharmacy: str | None
     payment_method: str | None
+    delivery_address: str | None = None
+    delivery_lat: float | None = None
+    delivery_lng: float | None = None
     pharmacy_approved_by_name: str | None = None
     pharmacy_approved_at: datetime | None = None
     last_status_updated_by_role: str | None = None
