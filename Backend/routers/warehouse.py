@@ -107,30 +107,80 @@ def list_warehouse_stock(
     ]
 
 
+@router.get("/stock-breakdown")
+def stock_breakdown(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _ensure_warehouse_or_admin(current_user)
+    meds = db.query(Medicine).order_by(Medicine.name.asc()).all()
+    warehouse_rows = db.query(WarehouseStock).all()
+    warehouse_map = {r.medicine_id: r.quantity for r in warehouse_rows}
+    dispatched = (
+        db.query(WarehouseTransfer)
+        .filter(
+            WarehouseTransfer.direction == TransferDirection.warehouse_to_pharmacy,
+            WarehouseTransfer.status == TransferStatus.dispatched,
+        )
+        .all()
+    )
+    pharmacy_totals: dict[int, int] = {}
+    for row in dispatched:
+        pharmacy_totals[row.medicine_id] = pharmacy_totals.get(row.medicine_id, 0) + (row.quantity or 0)
+    return [
+        {
+            "medicine_id": m.id,
+            "name": m.name,
+            "pzn": m.pzn,
+            "admin_stock": m.stock or 0,
+            "warehouse_stock": warehouse_map.get(m.id, 0),
+            "pharmacy_stock_dispatched": pharmacy_totals.get(m.id, 0),
+        }
+        for m in meds
+    ]
+
+
 @router.get("/pharmacy-options")
 def list_pharmacy_options(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     _ensure_warehouse_or_admin(current_user)
-    stores = db.query(PharmacyStore).order_by(PharmacyStore.node_id.asc()).all()
-    if not stores:
-        pharmacy_users = db.query(User).filter(User.role == "pharmacy_store").order_by(User.id.asc()).all()
-        for u in pharmacy_users:
-            node_id = f"AUTO-PH-{u.id}"
-            if db.query(PharmacyStore).filter(PharmacyStore.node_id == node_id).first():
-                continue
-            db.add(
-                PharmacyStore(
-                    node_id=node_id,
-                    name=u.name or f"Pharmacy User {u.id}",
-                    location="Unassigned",
-                    active=True,
-                    load=0,
-                    stock_count=0,
-                )
+    # Pharmacy dashboard users are the source of truth for selectable pharmacies.
+    pharmacy_users = db.query(User).filter(User.role == "pharmacy_store").order_by(User.id.asc()).all()
+    synced_store_ids: list[int] = []
+    for u in pharmacy_users:
+        node_id = f"PH-U{u.id:03d}"
+        store = db.query(PharmacyStore).filter(PharmacyStore.node_id == node_id).first()
+        display_name = (u.name or "").strip() or (u.email or f"Pharmacy User {u.id}")
+        if not store:
+            store = PharmacyStore(
+                node_id=node_id,
+                name=display_name,
+                location="Dashboard Linked",
+                active=True,
+                load=0,
+                stock_count=0,
             )
-        db.commit()
+            db.add(store)
+            db.flush()
+        else:
+            store.name = display_name
+            if not store.location:
+                store.location = "Dashboard Linked"
+            if store.active is None:
+                store.active = True
+        synced_store_ids.append(store.id)
+    db.commit()
+
+    if synced_store_ids:
+        stores = (
+            db.query(PharmacyStore)
+            .filter(PharmacyStore.id.in_(synced_store_ids))
+            .order_by(PharmacyStore.node_id.asc())
+            .all()
+        )
+    else:
         stores = db.query(PharmacyStore).order_by(PharmacyStore.node_id.asc()).all()
     return [
         {"id": s.id, "node_id": s.node_id, "name": s.name, "location": s.location, "active": s.active}

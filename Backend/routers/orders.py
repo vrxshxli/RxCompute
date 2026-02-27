@@ -13,6 +13,7 @@ from models.notification import NotificationType
 from schemas.order import OrderCreate, OrderOut, OrderStatusUpdate
 from services.notifications import (
     create_notification,
+    run_in_background,
     send_order_email,
     send_push_if_available,
     send_staff_order_email,
@@ -131,8 +132,8 @@ def create_order(
     body = f"{order.order_uid} placed successfully. Total {order.total:.2f}"
     create_notification(db, current_user.id, NotificationType.order, title, body, has_action=True)
     db.commit()
-    send_push_if_available(current_user, title, body)
-    send_order_email(current_user, order)
+    run_in_background(send_push_if_available, current_user, title, body)
+    run_in_background(send_order_email, current_user, order)
     staff_users = db.query(User).filter(User.role.in_(["admin", "pharmacy_store"])).all()
     staff_title = "New Order Received"
     staff_body = f"{order.order_uid} placed by user #{order.user_id}. Total {order.total:.2f}"
@@ -145,8 +146,8 @@ def create_order(
             staff_body,
             has_action=True,
         )
-        send_push_if_available(staff, staff_title, staff_body)
-        send_staff_order_email(staff, order)
+        run_in_background(send_push_if_available, staff, staff_title, staff_body)
+        run_in_background(send_staff_order_email, staff, order)
     db.commit()
     dispatch_webhook(
         db,
@@ -251,8 +252,8 @@ def update_order_status(
         create_notification(db, order.user_id, NotificationType.order, title, body, has_action=True)
         db.commit()
         if order_owner:
-            send_push_if_available(order_owner, title, body)
-            send_order_email(order_owner, order)
+            run_in_background(send_push_if_available, order_owner, title, body)
+            run_in_background(send_order_email, order_owner, order)
     dispatch_webhook(
         db,
         event_type="order_status_updated",

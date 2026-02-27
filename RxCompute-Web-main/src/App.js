@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Routes, Route, useNavigate, Navigate } from 'react-router-dom';
-import { LayoutGrid, Package, Bell, ShoppingCart, Shield, Search, Link2, Users, Map, Inbox, CheckCircle2, AlertTriangle, BarChart3, Grid3X3, Truck, Wifi, Menu, UserCircle2 } from 'lucide-react';
+import { LayoutGrid, Package, Bell, ShoppingCart, Shield, Search, Link2, Users, Map, Inbox, CheckCircle2, AlertTriangle, BarChart3, Grid3X3, Truck, Wifi, Menu, UserCircle2, ActivitySquare } from 'lucide-react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { NotificationProvider, useNotifications } from './context/NotificationContext';
 import { Logo } from './components/shared';
@@ -19,6 +19,8 @@ import AdminAgentTraces from './pages/admin/AgentTraces';
 import AdminWebhookLogs from './pages/admin/WebhookLogs';
 import AdminPatients from './pages/admin/Patients';
 import AdminPharmacyGrid from './pages/admin/PharmacyGrid';
+import AdminProfile from './pages/admin/Profile';
+import AdminSystemHealth from './pages/admin/SystemHealth';
 
 // Pharmacy screens
 import PharmacyOrderQueue from './pages/pharmacy/OrderQueue';
@@ -47,6 +49,8 @@ const ADMIN_NAV = [
   { key: "webhook-logs", label: "Webhook Logs", icon: Link2 },
   { key: "patients", label: "Patients", icon: Users },
   { key: "pharmacy-grid", label: "Pharmacy Grid", icon: Map },
+  { key: "system-health", label: "System Health", icon: ActivitySquare },
+  { key: "profile", label: "Profile", icon: UserCircle2 },
 ];
 
 const PHARMACY_NAV = [
@@ -111,6 +115,8 @@ function DashboardShell() {
         case "webhook-logs": return <AdminWebhookLogs />;
         case "patients": return <AdminPatients />;
         case "pharmacy-grid": return <AdminPharmacyGrid />;
+        case "system-health": return <AdminSystemHealth />;
+        case "profile": return <AdminProfile />;
         default: return <AdminDashboard />;
       }
     }

@@ -1,6 +1,7 @@
 import smtplib
 import socket
 import traceback
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from email.mime.text import MIMEText
 
@@ -12,6 +13,15 @@ from config import SMTP_FALLBACK_TO_EMAIL, SMTP_FROM_EMAIL, SMTP_HOST, SMTP_PASS
 from models.notification import Notification, NotificationType
 from models.order import Order
 from models.user import User
+
+_BG_EXECUTOR = ThreadPoolExecutor(max_workers=6)
+
+
+def run_in_background(fn, *args, **kwargs) -> None:
+    try:
+        _BG_EXECUTOR.submit(fn, *args, **kwargs)
+    except Exception as exc:
+        print(f"Background task submit failed: {exc}")
 
 
 def create_notification(
@@ -202,11 +212,11 @@ def _send_email_with_port(msg: MIMEText, port: int) -> None:
         ip = row[4][0]
         try:
             if port == 465:
-                with smtplib.SMTP_SSL(ip, port, timeout=12) as server:
+                with smtplib.SMTP_SSL(ip, port, timeout=4) as server:
                     server.login(SMTP_USER, SMTP_PASSWORD)
                     server.send_message(msg)
                 return
-            with smtplib.SMTP(ip, port, timeout=12) as server:
+            with smtplib.SMTP(ip, port, timeout=4) as server:
                 server.ehlo()
                 if server.has_extn("starttls"):
                     server.starttls()

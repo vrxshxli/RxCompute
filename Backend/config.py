@@ -24,6 +24,10 @@ SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "bcc8845204a6c26da0f71357").replace("
 SMTP_FROM_EMAIL = os.getenv("SMTP_FROM_EMAIL", SMTP_USER)
 SMTP_FALLBACK_TO_EMAIL = os.getenv("SMTP_FALLBACK_TO_EMAIL", SMTP_FROM_EMAIL)
 
+# Prevent stale Gmail env from breaking delivery on restricted networks.
+if "gmail.com" in SMTP_HOST.lower() and os.getenv("ALLOW_GMAIL_SMTP", "").lower() not in {"1", "true", "yes"}:
+    SMTP_HOST = "smtp.maileroo.com"
+
 # Secret for external scheduler endpoint (e.g., cron-job.org)
 JOB_RUN_KEY = os.getenv("JOB_RUN_KEY", "")
 
