@@ -226,6 +226,9 @@ def list_safety_events(
                 metadata = json.loads(notif.metadata_json)
             except Exception:
                 metadata = None
+        target_user = None
+        if isinstance(metadata, dict) and isinstance(metadata.get("target_user_id"), int):
+            target_user = db.query(User).filter(User.id == metadata["target_user_id"]).first()
         out.append(
             {
                 "id": notif.id,
@@ -239,6 +242,10 @@ def list_safety_events(
                 "created_at": notif.created_at,
                 "severity": row_severity,
                 "metadata": metadata,
+                "target_user_id": target_user.id if target_user else (metadata.get("target_user_id") if isinstance(metadata, dict) else None),
+                "target_user_name": target_user.name if target_user else None,
+                "target_user_email": target_user.email if target_user else None,
+                "target_user_role": target_user.role if target_user else None,
             }
         )
     return out

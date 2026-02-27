@@ -77,6 +77,26 @@ def _build_safety_trace_metadata(order: Order | None, safety: dict, phase: str) 
     }
 
 
+def _publish_safety_trace_for_admins(
+    db: Session,
+    title: str,
+    body: str,
+    metadata: dict,
+) -> None:
+    admins = db.query(User).filter(User.role == "admin").all()
+    for admin in admins:
+        create_notification(
+            db,
+            admin.id,
+            NotificationType.safety,
+            title,
+            body,
+            has_action=True,
+            dedupe_window_minutes=0,
+            metadata=metadata,
+        )
+
+
 def _auto_review_pending_for_pharmacy(db: Session, pharmacy_user: User) -> None:
     pending_orders = (
         db.query(Order)
@@ -104,6 +124,16 @@ def _auto_review_pending_for_pharmacy(db: Session, pharmacy_user: User) -> None:
             user_id=order.user_id,
             matched_medicines=payload,
             user_message="Pharmacy auto-review pending order",
+        )
+        trace_meta = _build_safety_trace_metadata(order, safety, "pharmacy_auto_review")
+        trace_meta["target_user_id"] = order.user_id
+        trace_meta["triggered_by_user_id"] = pharmacy_user.id
+        trace_meta["triggered_by_role"] = pharmacy_user.role
+        _publish_safety_trace_for_admins(
+            db,
+            "Safety Agent Trace",
+            f"Auto review for {order.order_uid}",
+            trace_meta,
         )
         reason = (safety.get("safety_summary") or "").strip() or "Rejected by safety agent"
         now = datetime.utcnow()
@@ -251,20 +281,20 @@ def create_order(
         user_message="Order safety check before create_order",
     )
     trace_meta = _build_safety_trace_metadata(None, safety, "order_create")
+    trace_meta["target_user_id"] = current_user.id
+    trace_meta["triggered_by_user_id"] = current_user.id
+    trace_meta["triggered_by_role"] = current_user.role
+    _publish_safety_trace_for_admins(
+        db,
+        "Safety Agent Trace",
+        "User order safety check executed",
+        trace_meta,
+    )
     safety_summary = (safety.get("safety_summary") or "").strip()
     if safety.get("has_blocks"):
         title = "Safety Alert: Order Blocked"
         body = safety_summary or "Order blocked by safety policy checks."
         _broadcast_safety_alert(db, title, body, current_user)
-        create_notification(
-            db,
-            current_user.id,
-            NotificationType.safety,
-            "Safety Agent Trace",
-            body,
-            has_action=True,
-            metadata=trace_meta,
-        )
         db.commit()
         raise HTTPException(
             status_code=400,
@@ -278,15 +308,6 @@ def create_order(
         title = "Safety Warning: Review Needed"
         body = safety_summary or "Order has safety warnings. Pharmacist review recommended."
         _broadcast_safety_alert(db, title, body, current_user)
-        create_notification(
-            db,
-            current_user.id,
-            NotificationType.safety,
-            "Safety Agent Trace",
-            body,
-            has_action=True,
-            metadata=trace_meta,
-        )
         db.commit()
 
     med_ids = [item.medicine_id for item in data.items]
@@ -437,6 +458,15 @@ def update_order_status(
                 user_message="Pharmacy verification safety check",
             )
             verify_trace_meta = _build_safety_trace_metadata(order, safety_verify, "pharmacy_manual_verify")
+            verify_trace_meta["target_user_id"] = order.user_id
+            verify_trace_meta["triggered_by_user_id"] = current_user.id
+            verify_trace_meta["triggered_by_role"] = current_user.role
+            _publish_safety_trace_for_admins(
+                db,
+                "Safety Agent Trace",
+                f"Manual verify for {order.order_uid}",
+                verify_trace_meta,
+            )
             if safety_verify.get("has_blocks"):
                 auto_reject_reason = safety_verify.get("safety_summary", "") or "Rejected by safety agent checks"
                 new_status = OrderStatus.cancelled

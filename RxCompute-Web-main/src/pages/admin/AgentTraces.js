@@ -26,6 +26,10 @@ export default function AdminAgentTraces() {
             Number(e?.metadata?.ocr_details?.[0]?.confidence) ||
             (e.severity === 'blocked' ? 0.99 : e.severity === 'warning' ? 0.82 : 0.75),
           metadata: e.metadata || null,
+          target_user_name: e.target_user_name || null,
+          target_user_email: e.target_user_email || null,
+          target_user_role: e.target_user_role || null,
+          target_user_id: e.target_user_id || null,
           created_at: e.created_at,
         }));
         setLogs(mapped);
@@ -75,6 +79,9 @@ export default function AdminAgentTraces() {
           <span style={{ fontFamily:"monospace", fontSize:11, color:T.gray400 }}>{new Date(l.created_at).toLocaleTimeString("en-GB",{hour12:false})}</span>
         </div>
         <div style={{ fontSize:13, color:T.gray800, lineHeight:1.5 }}>{l.action}</div>
+        <div style={{ fontSize:11, color:T.gray600 }}>
+          Target user: {l.target_user_name || l.target_user_email || (l.target_user_id ? `User #${l.target_user_id}` : '-')} {l.target_user_role ? `(${l.target_user_role})` : ''}
+        </div>
         {Array.isArray(l?.metadata?.ocr_details) && l.metadata.ocr_details.length ? (
           <div style={{ border:`1px solid ${T.gray200}`, borderRadius:8, padding:10, background:T.gray50 }}>
             {l.metadata.ocr_details.map((d, idx) => (

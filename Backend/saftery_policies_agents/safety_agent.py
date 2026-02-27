@@ -43,6 +43,7 @@ import os
 import json
 import base64
 import mimetypes
+import re
 from urllib import request as urllib_request
 from urllib.error import URLError, HTTPError
 from langfuse.decorators import observe, langfuse_context
@@ -157,12 +158,14 @@ def _load_and_check_all(db, matched: list[dict]) -> list[SafetyCheckResult]:
 
     results: list[SafetyCheckResult] = []
 
+    ocr_cache: dict[str, dict] = {}
     for item in matched:
         mid = item["medicine_id"]
         qty = item.get("quantity", 1)
         dosage_instruction = item.get("dosage_instruction")
         strips_count = item.get("strips_count")
         rx_file = item.get("prescription_file")
+        item_name = item.get("name")
 
         med = med_map.get(mid)
 
@@ -177,12 +180,21 @@ def _load_and_check_all(db, matched: list[dict]) -> list[SafetyCheckResult]:
             ))
             continue
 
+        ocr_analysis = None
+        if med and med.rx_required and rx_file:
+            key = str(rx_file).strip()
+            if key not in ocr_cache:
+                ocr_cache[key] = _verify_prescription_with_gemini_ocr(med.name, key)
+            ocr_analysis = ocr_cache[key]
+
         result = _evaluate_rules(
             med=med,
             qty=qty,
             strips_count=strips_count,
             dosage_instruction=dosage_instruction,
             rx_file=rx_file,
+            item_name=item_name,
+            ocr_analysis=ocr_analysis,
         )
         results.append(result)
 
@@ -204,6 +216,8 @@ def _evaluate_rules(
     strips_count: int | None,
     dosage_instruction: str | None,
     rx_file: str | None,
+    item_name: str | None = None,
+    ocr_analysis: dict | None = None,
 ) -> SafetyCheckResult:
     """
     Run the 5-rule engine against one medicine.
@@ -259,7 +273,7 @@ def _evaluate_rules(
                 rule="prescription_file_invalid",
                 message=f"{name}: uploaded prescription is invalid or unclear. Please upload a clear prescription image/PDF.",
             )
-        ocr_decision = _verify_prescription_with_gemini_ocr(name, rx)
+        ocr_decision = ocr_analysis or _verify_prescription_with_gemini_ocr(name, rx)
         if not ocr_decision["ok"]:
             return SafetyCheckResult(
                 medicine_id=med.id,
@@ -270,6 +284,61 @@ def _evaluate_rules(
                 detail={
                     "confidence": ocr_decision.get("confidence"),
                     "indicators": ocr_decision.get("indicators", {}),
+                },
+            )
+        extracted_text = str(ocr_decision.get("extracted_text", "") or "")
+        if not _prescription_mentions_medicine(extracted_text, item_name or name):
+            return SafetyCheckResult(
+                medicine_id=med.id,
+                medicine_name=name,
+                status="blocked",
+                rule="prescription_medicine_mismatch",
+                message=f"{name}: uploaded prescription does not clearly mention this medicine.",
+                detail={
+                    "confidence": ocr_decision.get("confidence"),
+                    "indicators": {**ocr_decision.get("indicators", {}), "medicine_name_found": False},
+                },
+            )
+
+        strength = _extract_strength_token(item_name or name)
+        if strength and _normalize_text(strength) not in _normalize_text(extracted_text):
+            return SafetyCheckResult(
+                medicine_id=med.id,
+                medicine_name=name,
+                status="blocked",
+                rule="prescription_dosage_strength_mismatch",
+                message=f"{name}: strength/dosage on prescription does not match ordered medicine ({strength}).",
+                detail={
+                    "confidence": ocr_decision.get("confidence"),
+                    "indicators": {**ocr_decision.get("indicators", {}), "strength_found": False},
+                },
+            )
+
+        dosage_txt = (dosage_instruction or "").strip()
+        if dosage_txt and _has_digit(dosage_txt) and not _prescription_mentions_dosage(extracted_text, dosage_txt):
+            return SafetyCheckResult(
+                medicine_id=med.id,
+                medicine_name=name,
+                status="blocked",
+                rule="prescription_dosage_instruction_mismatch",
+                message=f"{name}: dosage instruction '{dosage_txt}' not found in prescription text.",
+                detail={
+                    "confidence": ocr_decision.get("confidence"),
+                    "indicators": {**ocr_decision.get("indicators", {}), "dosage_found": False},
+                },
+            )
+
+        strips_to_check = strips_count if isinstance(strips_count, int) and strips_count > 0 else qty
+        if strips_to_check > 1 and not _prescription_mentions_strips(extracted_text, strips_to_check):
+            return SafetyCheckResult(
+                medicine_id=med.id,
+                medicine_name=name,
+                status="blocked",
+                rule="prescription_strips_mismatch",
+                message=f"{name}: requested strips/quantity ({strips_to_check}) not present in prescription.",
+                detail={
+                    "confidence": ocr_decision.get("confidence"),
+                    "indicators": {**ocr_decision.get("indicators", {}), "strips_found": False},
                 },
             )
 
@@ -480,11 +549,11 @@ def _verify_prescription_with_gemini_ocr(medicine_name: str, rx_file: str) -> di
         return {"ok": False, "reason": f"Unable to open prescription file for AI verification: {exc}", "confidence": 0.0, "indicators": {}}
 
     prompt = (
-        "You are a strict medical safety OCR checker.\n"
-        "Check if this file is a real doctor's prescription and readable enough for safe dispensing.\n"
+        "You are a strict medical safety OCR extractor and validator.\n"
+        "Extract readable text from this image/pdf and validate if it is a real doctor's prescription.\n"
         "Return ONLY valid JSON (no markdown) with keys:\n"
         "is_prescription (bool), is_clear (bool), doctor_present (bool), "
-        "medicine_or_dosage_present (bool), confidence (number 0 to 1), reason (string).\n"
+        "medicine_or_dosage_present (bool), extracted_text (string), confidence (number 0 to 1), reason (string).\n"
         f"Target medicine context: {medicine_name}\n"
     )
     payload = {
@@ -533,12 +602,14 @@ def _verify_prescription_with_gemini_ocr(medicine_name: str, rx_file: str) -> di
             "reason": "Prescription AI returned unreadable output. Please upload a clearer prescription.",
             "confidence": 0.0,
             "indicators": {},
+            "extracted_text": "",
         }
 
     is_prescription = bool(result.get("is_prescription"))
     is_clear = bool(result.get("is_clear"))
     doctor_present = bool(result.get("doctor_present"))
     med_or_dosage = bool(result.get("medicine_or_dosage_present"))
+    extracted_text = str(result.get("extracted_text", "") or "").strip()
     confidence = float(result.get("confidence", 0) or 0)
     reason = str(result.get("reason", "Prescription failed strict OCR checks")).strip()
 
@@ -550,25 +621,35 @@ def _verify_prescription_with_gemini_ocr(medicine_name: str, rx_file: str) -> di
             "is_clear": is_clear,
             "doctor_present": doctor_present,
             "medicine_or_dosage_present": med_or_dosage,
+            "extracted_text_length": len(extracted_text),
             "confidence": confidence,
             "reason": reason,
         }
     )
+    text_ok = len(extracted_text) >= 20 and _looks_like_medical_text(extracted_text)
     passed = is_prescription and is_clear and doctor_present and med_or_dosage and confidence >= 0.55
     indicators = {
         "is_prescription": is_prescription,
         "is_clear": is_clear,
         "doctor_present": doctor_present,
         "medicine_or_dosage_present": med_or_dosage,
+        "text_detected": text_ok,
     }
-    if not passed:
+    if not passed or not text_ok:
         return {
             "ok": False,
-            "reason": reason or "Prescription is unclear or not valid.",
+            "reason": reason or ("Prescription text is not clear/readable." if not text_ok else "Prescription is unclear or not valid."),
             "confidence": confidence,
             "indicators": indicators,
+            "extracted_text": extracted_text,
         }
-    return {"ok": True, "reason": "Prescription verified by OCR", "confidence": confidence, "indicators": indicators}
+    return {
+        "ok": True,
+        "reason": "Prescription verified by OCR",
+        "confidence": confidence,
+        "indicators": indicators,
+        "extracted_text": extracted_text,
+    }
 
 
 def _load_prescription_bytes(rx_file: str) -> tuple[bytes, str]:
@@ -594,6 +675,62 @@ def _load_prescription_bytes(rx_file: str) -> tuple[bytes, str]:
 def _guess_mime(path: str) -> str:
     guessed, _ = mimetypes.guess_type(path)
     return guessed or "application/octet-stream"
+
+
+def _normalize_text(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).strip()
+
+
+def _has_digit(text: str) -> bool:
+    return bool(re.search(r"\d", text or ""))
+
+
+def _extract_strength_token(name: str) -> str:
+    m = re.search(r"\b\d+\s?(mg|mcg|ml|g)\b", (name or "").lower())
+    return m.group(0) if m else ""
+
+
+def _looks_like_medical_text(text: str) -> bool:
+    t = _normalize_text(text)
+    keywords = {"rx", "prescription", "tab", "tablet", "capsule", "mg", "ml", "doctor", "dose", "daily"}
+    return any(k in t for k in keywords)
+
+
+def _prescription_mentions_medicine(text: str, medicine_name: str) -> bool:
+    t = _normalize_text(text)
+    name_tokens = [tok for tok in _normalize_text(medicine_name).split() if len(tok) >= 4 and tok not in {"tablet", "tablets", "capsule", "capsules"}]
+    if not name_tokens:
+        return False
+    # Require at least one strong token and preferably first brand token.
+    first = name_tokens[0]
+    if first not in t:
+        return False
+    return any(tok in t for tok in name_tokens)
+
+
+def _prescription_mentions_dosage(text: str, dosage_instruction: str) -> bool:
+    t = _normalize_text(text)
+    d = _normalize_text(dosage_instruction)
+    if d in t:
+        return True
+    # Accept numeric schedule presence (e.g. 1-0-1, 1 0 1).
+    nums = re.findall(r"\d+", dosage_instruction or "")
+    if nums and " ".join(nums) in t:
+        return True
+    return False
+
+
+def _prescription_mentions_strips(text: str, strips: int) -> bool:
+    t = _normalize_text(text)
+    patterns = [
+        f"{strips}",
+        f"{strips} strip",
+        f"{strips} strips",
+        f"{strips} tab",
+        f"{strips} tablet",
+        f"{strips} tablets",
+    ]
+    return any(p in t for p in patterns)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
