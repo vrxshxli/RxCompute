@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:audioplayers/audioplayers.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/rx_theme_ext.dart';
@@ -24,6 +25,7 @@ class _MS extends State<MainShell> {
   StreamSubscription<String>? _tokenSub;
   StreamSubscription<RemoteMessage>? _onMessageSub;
   StreamSubscription<RemoteMessage>? _onMessageOpenSub;
+  final AudioPlayer _audioPlayer = AudioPlayer();
 
   @override
   void initState() {
@@ -48,6 +50,7 @@ class _MS extends State<MainShell> {
         if (!mounted) return;
         final title = message.notification?.title ?? 'RxCompute';
         final body = message.notification?.body ?? 'New update available';
+        _audioPlayer.play(AssetSource('sounds/rx_tune.wav'));
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('$title: $body')),
         );
@@ -64,6 +67,7 @@ class _MS extends State<MainShell> {
     _tokenSub?.cancel();
     _onMessageSub?.cancel();
     _onMessageOpenSub?.cancel();
+    _audioPlayer.dispose();
     super.dispose();
   }
 

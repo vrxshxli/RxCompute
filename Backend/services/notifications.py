@@ -43,11 +43,12 @@ def send_push_if_available(user: User | None, title: str, body: str) -> None:
             token=user.push_token,
             notification=messaging.Notification(title=title, body=body),
             android=messaging.AndroidConfig(
-                notification=messaging.AndroidNotification(sound="default"),
+                notification_channel_id="rxcompute_alerts",
+                notification=messaging.AndroidNotification(sound="rx_tune"),
             ),
             apns=messaging.APNSConfig(
                 payload=messaging.APNSPayload(
-                    aps=messaging.Aps(sound="default"),
+                    aps=messaging.Aps(sound="rx_tune.wav"),
                 )
             ),
         )

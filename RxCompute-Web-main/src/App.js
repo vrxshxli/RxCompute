@@ -68,7 +68,7 @@ const WAREHOUSE_NAV = [
 
 /* ═══════ DASHBOARD SHELL (sidebar + topbar + content) ═══════ */
 function DashboardShell() {
-  const { user } = useAuth();
+  const { user, token, apiBase } = useAuth();
   const role = user?.role || "admin";
   const isAdmin = role === "admin" || role === "user";
   const isPharmacy = role === "pharmacy_store" || role === "pharmacy";
@@ -76,6 +76,8 @@ function DashboardShell() {
   const [page, setPage] = useState(defaultPage);
   const [collapsed, setCollapsed] = useState(window.innerWidth < 992);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 992);
+  const [notifications, setNotifications] = useState([]);
+  const [showNotifications, setShowNotifications] = useState(false);
 
   useEffect(() => {
     setPage(isAdmin ? "dashboard" : isPharmacy ? "order-queue" : "fulfillment");
@@ -89,6 +91,39 @@ function DashboardShell() {
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
+
+  useEffect(() => {
+    if (!token) return undefined;
+    let mounted = true;
+    let previousUnread = 0;
+    const loadNotifications = async () => {
+      try {
+        const res = await fetch(`${apiBase}/notifications/`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!mounted) return;
+        const list = Array.isArray(data) ? data : [];
+        const unread = list.filter((n) => !n.is_read).length;
+        if (unread > previousUnread) {
+          try {
+            const audio = new Audio("/rx_tune.wav");
+            audio.volume = 0.85;
+            audio.play().catch(() => {});
+          } catch (_) {}
+        }
+        previousUnread = unread;
+        setNotifications(list.slice(0, 20));
+      } catch (_) {}
+    };
+    loadNotifications();
+    const id = window.setInterval(loadNotifications, 15000);
+    return () => {
+      mounted = false;
+      window.clearInterval(id);
+    };
+  }, [token, apiBase]);
 
   const nav = isAdmin ? ADMIN_NAV : isPharmacy ? PHARMACY_NAV : WAREHOUSE_NAV;
   const handleSelectPage = (nextPage) => {
@@ -135,6 +170,7 @@ function DashboardShell() {
   };
 
   const roleColor = isAdmin ? T.orange : isPharmacy ? T.blue : T.green;
+  const unreadCount = notifications.filter((n) => !n.is_read).length;
 
   return (
     <div style={{ minHeight: "100vh", background: T.gray100 }}>
@@ -155,6 +191,21 @@ function DashboardShell() {
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: T.green }}><Wifi size={12} /> Systems OK</div>
           <div style={{ width: 1, height: 20, background: T.navy600 }} />
+          <div style={{ position: "relative" }}>
+            <button
+              onClick={() => setShowNotifications((v) => !v)}
+              style={{ background: "transparent", border: "none", color: T.white, cursor: "pointer", display: "flex", alignItems: "center", position: "relative" }}
+            >
+              <Bell size={16} />
+              {unreadCount > 0 ? <span style={{ position: "absolute", top: -6, right: -7, minWidth: 14, height: 14, borderRadius: 7, background: T.red, color: T.white, fontSize: 9, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 3px" }}>{Math.min(99, unreadCount)}</span> : null}
+            </button>
+            {showNotifications ? (
+              <div style={{ position: "absolute", right: 0, top: 28, width: 360, maxHeight: 420, overflowY: "auto", background: T.white, border: `1px solid ${T.gray200}`, borderRadius: 10, boxShadow: "0 10px 24px rgba(0,0,0,.15)", zIndex: 80 }}>
+                <div style={{ padding: 10, borderBottom: `1px solid ${T.gray100}`, fontSize: 12, fontWeight: 700, color: T.gray800 }}>Notifications</div>
+                {notifications.length === 0 ? <div style={{ padding: 12, fontSize: 12, color: T.gray500 }}>No notifications yet</div> : notifications.map((n) => <div key={n.id} style={{ padding: 10, borderBottom: `1px solid ${T.gray100}`, background: n.is_read ? T.white : `${T.blue}08` }}><div style={{ fontSize: 12, fontWeight: 600, color: T.gray800 }}>{n.title}</div><div style={{ fontSize: 11, color: T.gray500, marginTop: 3 }}>{n.body}</div></div>)}
+              </div>
+            ) : null}
+          </div>
           <div style={{ fontSize: 12, color: T.gray300, fontWeight: 600 }}>{user?.name || "User"}</div>
           <div style={{ width: 28, height: 28, borderRadius: "50%", background: T.navy700, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: T.white, fontWeight: 700 }}>{user?.avatar}</div>
         </div>
