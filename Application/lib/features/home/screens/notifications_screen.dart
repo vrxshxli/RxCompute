@@ -7,8 +7,23 @@ import '../../../core/widgets/shared_widgets.dart';
 import '../../../data/models/notification_model.dart';
 import '../bloc/home_bloc.dart';
 
-class NotificationsScreen extends StatelessWidget {
+class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({super.key});
+
+  @override
+  State<NotificationsScreen> createState() => _NotificationsScreenState();
+}
+
+class _NotificationsScreenState extends State<NotificationsScreen> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        context.read<HomeBloc>().add(LoadHomeDataEvent());
+      }
+    });
+  }
 
   Color _c(NotificationType t) {
     switch (t) {
@@ -36,8 +51,13 @@ class NotificationsScreen extends StatelessWidget {
             leading: IconButton(icon: Icon(Icons.arrow_back_rounded, color: r.text1), onPressed: () => Navigator.pop(context)),
             title: Text('NOTIFICATIONS', style: GoogleFonts.outfit(color: r.text1, fontSize: 13, fontWeight: FontWeight.w700, letterSpacing: 2)),
           ),
-          body: notifs.isEmpty
-              ? const EmptyState(icon: Icons.notifications_off_outlined, title: 'No notifications')
+          body: RefreshIndicator(
+            onRefresh: () async {
+              context.read<HomeBloc>().add(LoadHomeDataEvent());
+              await Future<void>.delayed(const Duration(milliseconds: 350));
+            },
+            child: notifs.isEmpty
+              ? ListView(children: const [SizedBox(height: 220), EmptyState(icon: Icons.notifications_off_outlined, title: 'No notifications')])
               : ListView.builder(
                   padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
                   itemCount: notifs.length,
@@ -69,6 +89,7 @@ class NotificationsScreen extends StatelessWidget {
                     );
                   },
                 ),
+          ),
         );
       },
     );

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter_tts/flutter_tts.dart';
@@ -13,7 +14,9 @@ import '../../../data/providers/api_provider.dart';
 import '../../../data/models/notification_model.dart';
 import '../../../data/repositories/medicine_repository.dart';
 import '../../../data/repositories/notification_repository.dart';
+import '../../../data/repositories/order_repository.dart';
 import '../../../data/repositories/user_repository.dart';
+import '../bloc/home_bloc.dart';
 import 'home_tab.dart';
 import '../../chat/screens/chat_screen.dart';
 import '../../medicine/screens/medicine_brain_screen.dart';
@@ -37,6 +40,7 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
   final stt.SpeechToText _speech = stt.SpeechToText();
   final MedicineRepository _medicineRepository = MedicineRepository();
   final NotificationRepository _notificationRepository = NotificationRepository();
+  final OrderRepository _orderRepository = OrderRepository();
   final ApiProvider _apiProvider = ApiProvider();
   bool _speechReady = false;
   bool _isListening = false;
@@ -46,6 +50,8 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
   Timer? _notifPoller;
   int _lastSeenNotifId = 0;
   bool _didInitialNotificationSpeak = false;
+  final Set<int> _spokenNotifIds = <int>{};
+  final Map<String, DateTime> _speakDedupe = <String, DateTime>{};
 
   @override
   void initState() {
@@ -86,10 +92,13 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('$title: $body')),
         );
+        context.read<HomeBloc>().add(LoadHomeDataEvent());
       });
       _onMessageOpenSub = FirebaseMessaging.onMessageOpenedApp.listen((_) {
         if (!mounted) return;
         setState(() => _i = 0);
+        _pollAndSpeakNotifications(forceSpeakRefillOnOpen: true);
+        context.read<HomeBloc>().add(LoadHomeDataEvent());
       });
     } catch (e) {
       debugPrint('⚠️ Push init failed: $e');
@@ -115,6 +124,9 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
     try {
       final list = await _notificationRepository.getNotifications();
       if (list.isEmpty) return;
+      if (mounted) {
+        context.read<HomeBloc>().add(LoadHomeDataEvent());
+      }
       final sorted = [...list]..sort((a, b) => b.id.compareTo(a.id));
       final maxId = sorted.first.id;
 
@@ -147,6 +159,8 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
   }
 
   void _announceFromModel(NotificationModel n, {bool highPriority = false}) {
+    if (_spokenNotifIds.contains(n.id)) return;
+    _spokenNotifIds.add(n.id);
     final isSafety = n.type == NotificationType.safety;
     final isRefill = n.type == NotificationType.refill;
     final isOrder = n.type == NotificationType.order;
@@ -168,6 +182,14 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
     bool isOrder = false,
     bool highPriority = false,
   }) {
+    final key = '${title.trim()}|${body.trim()}'.toLowerCase();
+    final now = DateTime.now();
+    final last = _speakDedupe[key];
+    if (last != null && now.difference(last).inSeconds < 45) {
+      return;
+    }
+    _speakDedupe[key] = now;
+
     _audioPlayer.play(AssetSource('sounds/rx_tune.wav'));
     if (isSafety || highPriority) {
       Future.delayed(const Duration(milliseconds: 900), () {
@@ -183,10 +205,32 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
       return;
     }
     if (isOrder) {
-      _speak('Order update. $title. $body');
+      _announceOrderUpdate(title, body);
       return;
     }
     _speak('$title. $body');
+  }
+
+  Future<void> _announceOrderUpdate(String title, String body) async {
+    String medsPart = '';
+    try {
+      final orders = await _orderRepository.getOrders();
+      if (orders.isNotEmpty && orders.first.items.isNotEmpty) {
+        final names = orders.first.items.map((e) => e.name).where((e) => e.trim().isNotEmpty).toList();
+        if (names.isNotEmpty) {
+          medsPart = names.take(2).join(', ');
+        }
+      }
+    } catch (_) {}
+    final cleanedBody = body
+        .replaceAll(RegExp(r'ORD-\d{8}-[A-Z0-9]+', caseSensitive: false), 'your order')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    if (medsPart.isNotEmpty) {
+      await _speak('Order update for medicines $medsPart. $cleanedBody');
+      return;
+    }
+    await _speak('Order update. $cleanedBody');
   }
 
   Future<void> _initVoiceAssistant() async {

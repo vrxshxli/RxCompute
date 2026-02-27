@@ -315,7 +315,19 @@ def _evaluate_rules(
             )
 
         dosage_txt = (dosage_instruction or "").strip()
-        if dosage_txt and _has_digit(dosage_txt) and not _prescription_mentions_dosage(extracted_text, dosage_txt):
+        if not dosage_txt:
+            return SafetyCheckResult(
+                medicine_id=med.id,
+                medicine_name=name,
+                status="blocked",
+                rule="dosage_missing_for_rx",
+                message=f"{name}: dosage instruction is required for Rx verification.",
+                detail={
+                    "confidence": ocr_decision.get("confidence"),
+                    "indicators": {**ocr_decision.get("indicators", {}), "dosage_found": False},
+                },
+            )
+        if not _prescription_mentions_dosage(extracted_text, dosage_txt):
             return SafetyCheckResult(
                 medicine_id=med.id,
                 medicine_name=name,
