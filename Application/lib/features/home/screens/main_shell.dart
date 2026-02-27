@@ -10,6 +10,7 @@ import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:google_fonts/google_fonts.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/rx_theme_ext.dart';
+import '../../../core/services/local_notification_service.dart';
 import '../../../data/providers/api_provider.dart';
 import '../../../data/models/notification_model.dart';
 import '../../../data/repositories/medicine_repository.dart';
@@ -88,6 +89,7 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
         final isSafety = lowered.contains('safety');
         final isRefill = lowered.contains('refill');
         final isOrder = lowered.contains('order');
+        LocalNotificationService.show(title: title, body: body, id: DateTime.now().millisecondsSinceEpoch.remainder(1000000));
         _announceMessage(title: title, body: body, isSafety: isSafety, isRefill: isRefill, isOrder: isOrder);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('$title: $body')),
@@ -215,8 +217,20 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
     String medsPart = '';
     try {
       final orders = await _orderRepository.getOrders();
-      if (orders.isNotEmpty && orders.first.items.isNotEmpty) {
-        final names = orders.first.items.map((e) => e.name).where((e) => e.trim().isNotEmpty).toList();
+      final uid = _extractOrderUid('$title $body');
+      dynamic target;
+      if (uid == null) {
+        target = orders.isNotEmpty ? orders.first : null;
+      } else {
+        for (final o in orders) {
+          if (o.orderUid.toUpperCase() == uid.toUpperCase()) {
+            target = o;
+            break;
+          }
+        }
+      }
+      if (target != null && target.items.isNotEmpty) {
+        final names = target.items.map((e) => e.name).where((e) => e.trim().isNotEmpty).toList();
         if (names.isNotEmpty) {
           medsPart = names.take(2).join(', ');
         }
@@ -231,6 +245,11 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
       return;
     }
     await _speak('Order update. $cleanedBody');
+  }
+
+  String? _extractOrderUid(String text) {
+    final m = RegExp(r'ORD-\d{8}-[A-Z0-9]+', caseSensitive: false).firstMatch(text);
+    return m?.group(0);
   }
 
   Future<void> _initVoiceAssistant() async {

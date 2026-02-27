@@ -6,6 +6,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 
 import 'config/routes.dart';
 import 'core/theme/app_theme.dart';
+import 'core/services/local_notification_service.dart';
 
 // ─── BLoCs ────────────────────────────────────────────────
 import 'features/theme/bloc/theme_bloc.dart';
@@ -33,6 +34,7 @@ void main() async {
     debugPrint('   Make sure google-services.json is in android/app/');
   }
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+  await LocalNotificationService.init();
   await FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(
     alert: true,
     badge: true,

@@ -44,6 +44,7 @@ import json
 import base64
 import mimetypes
 import re
+from math import ceil
 from urllib import request as urllib_request
 from urllib.error import URLError, HTTPError
 from langfuse.decorators import observe, langfuse_context
@@ -366,6 +367,55 @@ def _evaluate_rules(
                     "indicators": {**ocr_decision.get("indicators", {}), "days_found": False},
                 },
             )
+        days = _extract_prescribed_days(extracted_text)
+        per_day = _estimate_daily_units_from_dosage(dosage_txt)
+        if days is None or days <= 0:
+            return SafetyCheckResult(
+                medicine_id=med.id,
+                medicine_name=name,
+                status="blocked",
+                rule="prescription_days_parse_failed",
+                message=f"{name}: unable to parse treatment duration from prescription.",
+                detail={
+                    "confidence": ocr_decision.get("confidence"),
+                    "indicators": {**ocr_decision.get("indicators", {}), "days_found": False},
+                },
+            )
+        if per_day is None or per_day <= 0:
+            return SafetyCheckResult(
+                medicine_id=med.id,
+                medicine_name=name,
+                status="blocked",
+                rule="dosage_parse_failed",
+                message=f"{name}: dosage format is unclear; cannot compute daily consumption.",
+                detail={
+                    "confidence": ocr_decision.get("confidence"),
+                    "indicators": {**ocr_decision.get("indicators", {}), "dosage_found": False},
+                },
+            )
+        units_per_strip = _extract_units_per_strip(med.package)
+        required_units = days * per_day
+        required_strips = max(1, ceil(required_units / units_per_strip))
+        if strips_to_check < required_strips:
+            return SafetyCheckResult(
+                medicine_id=med.id,
+                medicine_name=name,
+                status="blocked",
+                rule="insufficient_strips_for_duration",
+                message=(
+                    f"{name}: requested strips ({strips_to_check}) are insufficient for {days} day(s) at "
+                    f"{per_day}/day. Minimum required strips: {required_strips}."
+                ),
+                detail={
+                    "confidence": ocr_decision.get("confidence"),
+                    "indicators": {
+                        **ocr_decision.get("indicators", {}),
+                        "days_found": True,
+                        "dosage_found": True,
+                        "required_strips": required_strips,
+                    },
+                },
+            )
 
     # ────────────────────────────────────────────────────
     # RULE 2: Completely Out of Stock
@@ -576,10 +626,10 @@ def _verify_prescription_with_gemini_ocr(medicine_name: str, rx_file: str) -> di
     prompt = (
         "You are a strict medical safety OCR extractor and validator.\n"
         "Extract readable text from this image/pdf and validate if it is a real doctor's prescription.\n"
+        "Do NOT infer or invent medicine names, dosage, or duration. Use only text that is visibly present.\n"
         "Return ONLY valid JSON (no markdown) with keys:\n"
         "is_prescription (bool), is_clear (bool), doctor_present (bool), "
         "medicine_or_dosage_present (bool), extracted_text (string), confidence (number 0 to 1), reason (string).\n"
-        f"Target medicine context: {medicine_name}\n"
     )
     payload = {
         "contents": [
@@ -765,6 +815,50 @@ def _prescription_mentions_days(text: str) -> bool:
         return True
     # Also accept compact forms such as "x5d", "5d", "7days".
     return bool(re.search(r"\b(x?\d+\s*d)\b", t))
+
+
+def _extract_prescribed_days(text: str) -> int | None:
+    t = _normalize_text(text)
+    m = re.search(r"\b(\d+)\s*(day|days)\b", t)
+    if m:
+        return int(m.group(1))
+    m = re.search(r"\b(\d+)\s*(week|weeks)\b", t)
+    if m:
+        return int(m.group(1)) * 7
+    m = re.search(r"\b(\d+)\s*(month|months)\b", t)
+    if m:
+        return int(m.group(1)) * 30
+    m = re.search(r"\bx?(\d+)\s*d\b", t)
+    if m:
+        return int(m.group(1))
+    return None
+
+
+def _estimate_daily_units_from_dosage(dosage_instruction: str) -> int | None:
+    d = _normalize_text(dosage_instruction)
+    nums = [int(x) for x in re.findall(r"\d+", d)]
+    if "-" in dosage_instruction and nums:
+        s = sum(nums[:4])
+        return s if s > 0 else None
+    if len(nums) >= 2 and ("per day" in d or "/day" in d):
+        return nums[0] if nums[0] > 0 else None
+    if len(nums) == 1 and ("daily" in d or "day" in d):
+        return nums[0] if nums[0] > 0 else None
+    if "once daily" in d or "od" in d:
+        return 1
+    if "twice daily" in d or "bd" in d:
+        return 2
+    if "thrice daily" in d or "tid" in d:
+        return 3
+    return nums[0] if nums else None
+
+
+def _extract_units_per_strip(package: str | None) -> int:
+    p = (package or "").lower()
+    m = re.search(r"\b(\d+)\s*(tablet|tablets|capsule|capsules|tab)\b", p)
+    if m:
+        return max(int(m.group(1)), 1)
+    return 20
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
