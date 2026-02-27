@@ -1,6 +1,9 @@
 import smtplib
 import socket
 import traceback
+import json
+from urllib import request as urllib_request
+from urllib.error import HTTPError, URLError
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from email.mime.text import MIMEText
@@ -9,7 +12,16 @@ import firebase_admin
 from firebase_admin import messaging
 from sqlalchemy.orm import Session
 
-from config import SMTP_FALLBACK_TO_EMAIL, SMTP_FROM_EMAIL, SMTP_HOST, SMTP_PASSWORD, SMTP_PORT, SMTP_USER
+from config import (
+    MAILEROO_API_KEY,
+    MAILEROO_API_URL,
+    SMTP_FALLBACK_TO_EMAIL,
+    SMTP_FROM_EMAIL,
+    SMTP_HOST,
+    SMTP_PASSWORD,
+    SMTP_PORT,
+    SMTP_USER,
+)
 from models.notification import Notification, NotificationType
 from models.order import Order
 from models.user import User
@@ -229,8 +241,16 @@ def _send_email(recipient_email: str, subject: str, body: str) -> None:
             last_exc = exc
             print(f"Email attempt failed on {SMTP_HOST}:{port} -> {exc}")
             continue
-    if last_exc:
-        raise last_exc
+    # SMTP failed on all ports. Try Maileroo HTTP API fallback.
+    try:
+        _send_email_via_maileroo_api(recipient_email, subject, body)
+        print("Email sent via Maileroo API fallback")
+        return
+    except Exception as api_exc:
+        print(f"Maileroo API fallback failed: {api_exc}")
+        if last_exc:
+            raise last_exc
+        raise api_exc
 
 
 def _send_email_with_port(msg: MIMEText, port: int) -> None:
@@ -260,3 +280,37 @@ def _send_email_with_port(msg: MIMEText, port: int) -> None:
             continue
     if last_exc:
         raise last_exc
+
+
+def _send_email_via_maileroo_api(recipient_email: str, subject: str, body: str) -> None:
+    if not MAILEROO_API_KEY:
+        raise RuntimeError("MAILEROO_API_KEY is missing")
+
+    payload = {
+        "from": {"email": SMTP_FROM_EMAIL or SMTP_USER},
+        "to": [{"email": recipient_email}],
+        "subject": subject,
+        "text": body,
+    }
+    raw = json.dumps(payload).encode("utf-8")
+    req = urllib_request.Request(
+        MAILEROO_API_URL,
+        data=raw,
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {MAILEROO_API_KEY}",
+            "X-API-Key": MAILEROO_API_KEY,
+        },
+    )
+    try:
+        with urllib_request.urlopen(req, timeout=8) as resp:
+            status = getattr(resp, "status", None) or resp.getcode()
+            if status < 200 or status >= 300:
+                body_text = resp.read().decode("utf-8", errors="ignore")
+                raise RuntimeError(f"Maileroo API non-2xx status {status}: {body_text}")
+    except HTTPError as exc:
+        details = exc.read().decode("utf-8", errors="ignore")
+        raise RuntimeError(f"Maileroo API HTTPError {exc.code}: {details}") from exc
+    except URLError as exc:
+        raise RuntimeError(f"Maileroo API URLError: {exc}") from exc

@@ -23,6 +23,8 @@ SMTP_USER = os.getenv("SMTP_USER", "14ef21.2474.dac6161459055e179893f2a71ee584a0
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "bcc8845204a6c26da0f71357").replace(" ", "")
 SMTP_FROM_EMAIL = os.getenv("SMTP_FROM_EMAIL", SMTP_USER)
 SMTP_FALLBACK_TO_EMAIL = os.getenv("SMTP_FALLBACK_TO_EMAIL", SMTP_FROM_EMAIL)
+MAILEROO_API_KEY = os.getenv("MAILEROO_API_KEY", "14ef213887d51207d795dde58177d3dbd46c39ddc53b98ce270837f5d3980175")
+MAILEROO_API_URL = os.getenv("MAILEROO_API_URL", "https://smtp.maileroo.com/api/v2/emails")
 
 # Prevent stale Gmail env from breaking delivery on restricted networks.
 if "gmail.com" in SMTP_HOST.lower() and os.getenv("ALLOW_GMAIL_SMTP", "").lower() not in {"1", "true", "yes"}:
