@@ -121,7 +121,7 @@ class OrderModel {
                 ?.map((e) => OrderItemModel.fromJson(e))
                 .toList() ??
             [],
-        createdAt: DateTime.parse(json['created_at']),
+        createdAt: DateTime.tryParse((json['created_at'] ?? '').toString()) ?? DateTime.now(),
       );
 
   String get formattedTotal => '₹${total.toStringAsFixed(2)}';

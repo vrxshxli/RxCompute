@@ -210,6 +210,25 @@ def send_order_email_snapshot(recipient_email: str | None, order_data: dict, sub
         traceback.print_exc()
 
 
+def send_safety_rejection_email(recipient_email: str | None, order_uid: str, reason: str) -> None:
+    if not recipient_email:
+        recipient_email = SMTP_FALLBACK_TO_EMAIL
+    if not recipient_email:
+        return
+    if not SMTP_HOST or not SMTP_USER or not SMTP_PASSWORD:
+        return
+    text = (
+        f"Your order {order_uid} was rejected by RxCompute safety agent.\n\n"
+        f"Reason:\n{reason}\n\n"
+        f"Please update prescription/details and place order again."
+    )
+    try:
+        _send_email(recipient_email, f"RxCompute Safety Rejection {order_uid}", text)
+    except Exception as exc:
+        print(f"Safety rejection email failed to {recipient_email}: {exc}")
+        traceback.print_exc()
+
+
 def send_test_email(recipient_email: str, subject: str, body: str) -> bool:
     if not SMTP_HOST or not SMTP_USER or not SMTP_PASSWORD:
         return False

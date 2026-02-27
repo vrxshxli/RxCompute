@@ -18,6 +18,7 @@ from services.notifications import (
     run_in_background,
     send_push_to_token,
     send_order_email_snapshot,
+    send_safety_rejection_email,
 )
 from services.webhooks import dispatch_webhook
 
@@ -91,6 +92,8 @@ def create_order(
             "medicine_id": it.medicine_id,
             "name": it.name,
             "quantity": it.quantity,
+            "dosage_instruction": it.dosage_instruction,
+            "strips_count": it.strips_count,
             "prescription_file": it.prescription_file,
         }
         for it in data.items
@@ -239,6 +242,7 @@ def update_order_status(
 
     if new_status.value == old_status:
         return order
+    auto_reject_reason = ""
 
     # Pharmacy must approve first. Admin handles downstream logistics.
     if current_user.role == "pharmacy_store":
@@ -246,6 +250,27 @@ def update_order_status(
             raise HTTPException(status_code=403, detail="Pharmacy can approve only pending orders")
         if new_status not in {OrderStatus.verified, OrderStatus.cancelled}:
             raise HTTPException(status_code=403, detail="Pharmacy can set only VERIFIED or CANCELLED")
+        if new_status == OrderStatus.verified:
+            # Pharmacy verification must pass safety checks, including prescription quality.
+            verify_payload = [
+                {
+                    "medicine_id": it.medicine_id,
+                    "name": it.name,
+                    "quantity": it.quantity,
+                    "dosage_instruction": it.dosage_instruction,
+                    "strips_count": it.strips_count,
+                    "prescription_file": it.prescription_file,
+                }
+                for it in order.items
+            ]
+            safety_verify = process_with_safety(
+                user_id=order.user_id,
+                matched_medicines=verify_payload,
+                user_message="Pharmacy verification safety check",
+            )
+            if safety_verify.get("has_blocks"):
+                auto_reject_reason = safety_verify.get("safety_summary", "") or "Rejected by safety agent checks"
+                new_status = OrderStatus.cancelled
     elif current_user.role == "admin":
         allowed_for_admin = {
             OrderStatus.picking,
@@ -308,6 +333,16 @@ def update_order_status(
         title = "Order Update"
         body = f"{order.order_uid} status is now {new_status.value.upper()}"
         create_notification(db, order.user_id, NotificationType.order, title, body, has_action=True)
+        if auto_reject_reason:
+            create_notification(
+                db,
+                order.user_id,
+                NotificationType.safety,
+                "Safety Agent Rejected Order",
+                auto_reject_reason,
+                has_action=True,
+                dedupe_window_minutes=1,
+            )
         db.commit()
         if order_owner:
             status_snapshot = {
@@ -320,6 +355,9 @@ def update_order_status(
             }
             run_in_background(send_push_to_token, order_owner.push_token, title, body, order_owner.id)
             run_in_background(send_order_email_snapshot, order_owner.email, status_snapshot, "RxCompute Order")
+            if auto_reject_reason:
+                run_in_background(send_push_to_token, order_owner.push_token, "Safety Agent Rejected Order", auto_reject_reason, order_owner.id)
+                run_in_background(send_safety_rejection_email, order_owner.email, order.order_uid, auto_reject_reason)
     dispatch_webhook(
         db,
         event_type="order_status_updated",

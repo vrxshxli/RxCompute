@@ -248,7 +248,7 @@ class _MS extends State<MainShell> {
     final r = context.rx;
     return Scaffold(
       body: IndexedStack(index: _i, children: _screens),
-      floatingActionButton: Column(
+      floatingActionButton: _i == 1 ? null : Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [

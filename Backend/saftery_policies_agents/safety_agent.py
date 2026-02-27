@@ -39,6 +39,7 @@ LANGFUSE TRACING:
 """
 
 import time
+import os
 from langfuse.decorators import observe, langfuse_context
 from database import SessionLocal
 from models.medicine import Medicine
@@ -153,6 +154,8 @@ def _load_and_check_all(db, matched: list[dict]) -> list[SafetyCheckResult]:
     for item in matched:
         mid = item["medicine_id"]
         qty = item.get("quantity", 1)
+        dosage_instruction = item.get("dosage_instruction")
+        strips_count = item.get("strips_count")
         rx_file = item.get("prescription_file")
 
         med = med_map.get(mid)
@@ -168,8 +171,18 @@ def _load_and_check_all(db, matched: list[dict]) -> list[SafetyCheckResult]:
             ))
             continue
 
-        result = _evaluate_rules(med, qty, rx_file)
+        result = _evaluate_rules(
+            med=med,
+            qty=qty,
+            strips_count=strips_count,
+            dosage_instruction=dosage_instruction,
+            rx_file=rx_file,
+        )
         results.append(result)
+
+    # Cross-medicine interaction checks (pair level).
+    pair_alerts = _evaluate_interactions(matched, med_map)
+    results.extend(pair_alerts)
 
     return results
 
@@ -182,6 +195,8 @@ def _load_and_check_all(db, matched: list[dict]) -> list[SafetyCheckResult]:
 def _evaluate_rules(
     med: Medicine,
     qty: int,
+    strips_count: int | None,
+    dosage_instruction: str | None,
     rx_file: str | None,
 ) -> SafetyCheckResult:
     """
@@ -194,6 +209,7 @@ def _evaluate_rules(
 
     stock = med.stock or 0
     name = med.name
+    strips = strips_count if (isinstance(strips_count, int) and strips_count > 0) else qty
 
     # ────────────────────────────────────────────────────
     # RULE 1: Prescription Required
@@ -215,6 +231,25 @@ def _evaluate_rules(
             rule="prescription_required",
             message=f"{name} requires a valid prescription. Please upload your prescription to proceed.",
         )
+
+    # RULE 1b: Prescription file must look valid and clear (extension/path sanity).
+    if med.rx_required and rx_file:
+        rx = str(rx_file).strip().lower()
+        allowed_ext = {".jpg", ".jpeg", ".png", ".pdf", ".webp"}
+        ext = os.path.splitext(rx)[1]
+        if ("/uploads/prescriptions/" not in rx) or (ext not in allowed_ext):
+            reasoning = (
+                f"Medicine '{name}' requires Rx. Uploaded file '{rx_file}' failed validation "
+                f"(expected prescriptions path + allowed extension). DECISION: BLOCK."
+            )
+            _langfuse_output({"rule": "prescription_file_invalid", "status": "BLOCKED", "reasoning": reasoning})
+            return SafetyCheckResult(
+                medicine_id=med.id,
+                medicine_name=name,
+                status="blocked",
+                rule="prescription_file_invalid",
+                message=f"{name}: uploaded prescription is invalid or unclear. Please upload a clear prescription image/PDF.",
+            )
 
     # ────────────────────────────────────────────────────
     # RULE 2: Completely Out of Stock
@@ -256,6 +291,21 @@ def _evaluate_rules(
             message=f"Only {stock} units of {name} available, but you requested {qty}. Maximum you can order: {stock}.",
         )
 
+    # RULE 3b: Strips must be positive and not exceed safe pack threshold.
+    if strips <= 0:
+        reasoning = (
+            f"Medicine '{name}' has strips_count={strips}. "
+            f"Strips must be >=1. DECISION: BLOCK."
+        )
+        _langfuse_output({"rule": "invalid_strips", "status": "BLOCKED", "reasoning": reasoning})
+        return SafetyCheckResult(
+            medicine_id=med.id,
+            medicine_name=name,
+            status="blocked",
+            rule="invalid_strips",
+            message=f"{name}: invalid strips requested. Minimum 1 strip is required.",
+        )
+
     # ────────────────────────────────────────────────────
     # RULE 4: Low Stock Warning
     # ────────────────────────────────────────────────────
@@ -281,10 +331,10 @@ def _evaluate_rules(
     # ────────────────────────────────────────────────────
     # USE CASE 6: 8 boxes of Paracetamol → WARN (possible misuse)
     #
-    if qty > 5:
+    if qty > 5 or strips > 10:
         reasoning = (
-            f"Medicine '{name}' ordered in quantity={qty} (above threshold of 5). "
-            f"This is flagged as unusual for a single patient order. "
+            f"Medicine '{name}' ordered in quantity={qty}, strips={strips} "
+            f"(above unusual threshold). "
             f"DECISION: WARNING — may require pharmacist review."
         )
         _langfuse_output({"rule": "high_quantity", "status": "WARNING", "reasoning": reasoning})
@@ -294,6 +344,22 @@ def _evaluate_rules(
             status="warning",
             rule="high_quantity",
             message=f"Large order flagged: {qty} units of {name}. Orders above 5 units may require pharmacist review.",
+        )
+
+    # RULE 6: Dosage quality check (minimum meaningful instruction for safe dispense).
+    dosage_txt = (dosage_instruction or "").strip()
+    if len(dosage_txt) < 4:
+        reasoning = (
+            f"Medicine '{name}' has weak dosage instruction '{dosage_instruction}'. "
+            f"DECISION: WARNING — requires pharmacist review before final dispense."
+        )
+        _langfuse_output({"rule": "dosage_instruction_weak", "status": "WARNING", "reasoning": reasoning})
+        return SafetyCheckResult(
+            medicine_id=med.id,
+            medicine_name=name,
+            status="warning",
+            rule="dosage_instruction_weak",
+            message=f"{name}: dosage instruction is incomplete. Pharmacist review recommended.",
         )
 
     # ────────────────────────────────────────────────────
@@ -315,6 +381,60 @@ def _evaluate_rules(
         rule="all_checks_passed",
         message=f"{name} — all safety checks passed.",
     )
+
+
+@observe(name="safety_interaction_rules")
+def _evaluate_interactions(matched: list[dict], med_map: dict[int, Medicine]) -> list[SafetyCheckResult]:
+    results: list[SafetyCheckResult] = []
+    ids = [m.get("medicine_id") for m in matched if m.get("medicine_id") in med_map]
+    unique_ids = list(dict.fromkeys(ids))
+    if len(unique_ids) < 2:
+        return results
+
+    names = {mid: (med_map[mid].name or "").lower() for mid in unique_ids}
+    severe_pairs = [
+        ("warfarin", "ibuprofen"),
+        ("sildenafil", "nitrate"),
+    ]
+    for i in range(len(unique_ids)):
+        for j in range(i + 1, len(unique_ids)):
+            a_id, b_id = unique_ids[i], unique_ids[j]
+            a_name, b_name = names[a_id], names[b_id]
+            for x, y in severe_pairs:
+                if ((x in a_name and y in b_name) or (x in b_name and y in a_name)):
+                    msg = (
+                        f"Potential severe interaction: '{med_map[a_id].name}' + '{med_map[b_id].name}'. "
+                        f"Pharmacist/manual review required before order."
+                    )
+                    _langfuse_output({"rule": "medicine_interaction_severe", "status": "BLOCKED", "pair": [a_id, b_id], "message": msg})
+                    results.append(
+                        SafetyCheckResult(
+                            medicine_id=a_id,
+                            medicine_name=f"{med_map[a_id].name} + {med_map[b_id].name}",
+                            status="blocked",
+                            rule="medicine_interaction_severe",
+                            message=msg,
+                        )
+                    )
+    if not results and len(unique_ids) >= 2:
+        # Generic pair review warning when multiple medicines are ordered together.
+        first = unique_ids[0]
+        second = unique_ids[1]
+        msg = (
+            f"Combination review: '{med_map[first].name}' + '{med_map[second].name}' "
+            f"ordered together. Interaction check passed but pharmacist review recommended."
+        )
+        _langfuse_output({"rule": "medicine_interaction_review", "status": "WARNING", "pair": [first, second], "message": msg})
+        results.append(
+            SafetyCheckResult(
+                medicine_id=first,
+                medicine_name=f"{med_map[first].name} + {med_map[second].name}",
+                status="warning",
+                rule="medicine_interaction_review",
+                message=msg,
+            )
+        )
+    return results
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
