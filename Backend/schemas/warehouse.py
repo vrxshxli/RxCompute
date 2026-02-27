@@ -42,3 +42,18 @@ class WarehouseTransferOut(BaseModel):
 
 class WarehouseTransferStatusUpdate(BaseModel):
     status: str
+
+
+class WarehouseMedicineCreate(BaseModel):
+    name: str
+    pzn: str
+    price: float
+    package: str | None = None
+    rx_required: bool = False
+    description: str | None = None
+    image_url: str | None = None
+    initial_stock: int = 0
+
+
+class WarehouseMedicineBulkCreate(BaseModel):
+    medicines: list[WarehouseMedicineCreate]

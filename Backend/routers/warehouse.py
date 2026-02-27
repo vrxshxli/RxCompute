@@ -1,4 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+import csv
+import io
+
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -14,6 +18,8 @@ from models.warehouse import (
 )
 from schemas.warehouse import (
     AdminToWarehouseCreate,
+    WarehouseMedicineBulkCreate,
+    WarehouseMedicineCreate,
     WarehouseStockOut,
     WarehouseToPharmacyCreate,
     WarehouseTransferOut,
@@ -48,6 +54,34 @@ def _get_or_create_stock(db: Session, medicine_id: int) -> WarehouseStock:
     return row
 
 
+def _upsert_warehouse_medicine(db: Session, med_data: WarehouseMedicineCreate) -> tuple[Medicine, WarehouseStock]:
+    med = db.query(Medicine).filter(Medicine.pzn == med_data.pzn.strip()).first()
+    if med:
+        med.name = med_data.name.strip()
+        med.price = float(med_data.price)
+        med.package = med_data.package.strip() if med_data.package else None
+        med.rx_required = bool(med_data.rx_required)
+        med.description = med_data.description.strip() if med_data.description else None
+        med.image_url = med_data.image_url.strip() if med_data.image_url else None
+    else:
+        med = Medicine(
+            name=med_data.name.strip(),
+            pzn=med_data.pzn.strip(),
+            price=float(med_data.price),
+            package=med_data.package.strip() if med_data.package else None,
+            stock=0,
+            rx_required=bool(med_data.rx_required),
+            description=med_data.description.strip() if med_data.description else None,
+            image_url=med_data.image_url.strip() if med_data.image_url else None,
+        )
+        db.add(med)
+        db.flush()
+    stock = _get_or_create_stock(db, med.id)
+    if med_data.initial_stock > 0:
+        stock.quantity = (stock.quantity or 0) + int(med_data.initial_stock)
+    return med, stock
+
+
 @router.get("/stock", response_model=list[WarehouseStockOut])
 def list_warehouse_stock(
     current_user: User = Depends(get_current_user),
@@ -71,6 +105,135 @@ def list_warehouse_stock(
         )
         for stock, med in rows
     ]
+
+
+@router.get("/pharmacy-options")
+def list_pharmacy_options(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _ensure_warehouse_or_admin(current_user)
+    stores = db.query(PharmacyStore).order_by(PharmacyStore.node_id.asc()).all()
+    if not stores:
+        pharmacy_users = db.query(User).filter(User.role == "pharmacy_store").order_by(User.id.asc()).all()
+        for u in pharmacy_users:
+            node_id = f"AUTO-PH-{u.id}"
+            if db.query(PharmacyStore).filter(PharmacyStore.node_id == node_id).first():
+                continue
+            db.add(
+                PharmacyStore(
+                    node_id=node_id,
+                    name=u.name or f"Pharmacy User {u.id}",
+                    location="Unassigned",
+                    active=True,
+                    load=0,
+                    stock_count=0,
+                )
+            )
+        db.commit()
+        stores = db.query(PharmacyStore).order_by(PharmacyStore.node_id.asc()).all()
+    return [
+        {"id": s.id, "node_id": s.node_id, "name": s.name, "location": s.location, "active": s.active}
+        for s in stores
+    ]
+
+
+@router.get("/medicines/csv-template")
+def warehouse_medicine_csv_template(
+    current_user: User = Depends(get_current_user),
+):
+    _ensure_warehouse_or_admin(current_user)
+    template = (
+        "name,pzn,price,package,rx_required,description,image_url,initial_stock\n"
+        "Paracetamol 500mg,13400000,45.5,10 tablets,false,Pain relief,,120\n"
+    )
+    return PlainTextResponse(template, media_type="text/csv")
+
+
+@router.post("/medicines")
+def add_warehouse_medicine(
+    data: WarehouseMedicineCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _ensure_warehouse_or_admin(current_user)
+    if data.initial_stock < 0:
+        raise HTTPException(status_code=400, detail="Initial stock cannot be negative")
+    med, stock = _upsert_warehouse_medicine(db, data)
+    db.commit()
+    db.refresh(med)
+    db.refresh(stock)
+    return {
+        "medicine_id": med.id,
+        "name": med.name,
+        "pzn": med.pzn,
+        "warehouse_stock": stock.quantity,
+        "message": "Medicine added/updated in warehouse",
+    }
+
+
+@router.post("/medicines/bulk")
+def add_warehouse_medicines_bulk(
+    payload: WarehouseMedicineBulkCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _ensure_warehouse_or_admin(current_user)
+    if not payload.medicines:
+        raise HTTPException(status_code=400, detail="No medicines provided")
+    created_or_updated = 0
+    for med_data in payload.medicines:
+        if med_data.initial_stock < 0:
+            raise HTTPException(status_code=400, detail=f"Initial stock cannot be negative for {med_data.name}")
+        _upsert_warehouse_medicine(db, med_data)
+        created_or_updated += 1
+    db.commit()
+    return {"message": "Bulk upload completed", "processed": created_or_updated}
+
+
+@router.post("/medicines/import-csv")
+async def add_warehouse_medicines_csv(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _ensure_warehouse_or_admin(current_user)
+    if not file.filename or not file.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Please upload a valid CSV file")
+    content = await file.read()
+    decoded = content.decode("utf-8-sig")
+    reader = csv.DictReader(io.StringIO(decoded))
+    required = ["name", "pzn", "price", "package", "rx_required", "description", "image_url", "initial_stock"]
+    headers = reader.fieldnames or []
+    if headers != required:
+        raise HTTPException(status_code=400, detail=f"Invalid CSV format. Expected headers exactly: {','.join(required)}")
+
+    processed = 0
+    skipped = 0
+    for row in reader:
+        try:
+            med_data = WarehouseMedicineCreate(
+                name=(row.get("name") or "").strip(),
+                pzn=(row.get("pzn") or "").strip(),
+                price=float((row.get("price") or "0").strip()),
+                package=(row.get("package") or "").strip() or None,
+                rx_required=(row.get("rx_required") or "").strip().lower() in {"true", "1", "yes"},
+                description=(row.get("description") or "").strip() or None,
+                image_url=(row.get("image_url") or "").strip() or None,
+                initial_stock=int((row.get("initial_stock") or "0").strip()),
+            )
+            if not med_data.name or not med_data.pzn:
+                skipped += 1
+                continue
+            if med_data.initial_stock < 0:
+                skipped += 1
+                continue
+            _upsert_warehouse_medicine(db, med_data)
+            processed += 1
+        except Exception:
+            skipped += 1
+    db.commit()
+    return {"message": "CSV upload completed", "processed": processed, "skipped": skipped}
 
 
 @router.get("/transfers", response_model=list[WarehouseTransferOut])
