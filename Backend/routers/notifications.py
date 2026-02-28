@@ -1,5 +1,6 @@
 import socket
 import json
+import math
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -249,6 +250,151 @@ def list_safety_events(
             }
         )
     return out
+
+
+def _infer_agent_name(title: str, body: str, metadata: dict | None) -> str:
+    raw = ""
+    if isinstance(metadata, dict):
+        raw = str(metadata.get("agent_name") or "").strip().lower()
+    if raw:
+        return raw
+    txt = f"{title} {body}".lower()
+    if "prediction" in txt:
+        return "prediction_agent"
+    if "scheduler" in txt:
+        return "scheduler_agent"
+    if "exception" in txt:
+        return "exception_agent"
+    if "demand forecast" in txt or "demand_forecast" in txt:
+        return "demand_forecast_agent"
+    if "order agent" in txt or "order_agent" in txt:
+        return "order_agent"
+    return "safety_agent"
+
+
+@router.get("/agent-traces")
+def list_agent_traces(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    agent_name: str = Query(default="all"),
+    search: str | None = Query(default=None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Only admin can view agent traces")
+
+    q = (
+        db.query(Notification)
+        .filter(
+            Notification.user_id == current_user.id,
+            Notification.type == NotificationType.safety,
+            or_(
+                Notification.title.ilike("%agent%"),
+                Notification.title.ilike("%trace%"),
+                Notification.body.ilike("%agent%"),
+                Notification.body.ilike("%trace%"),
+                Notification.metadata_json.isnot(None),
+            ),
+        )
+    )
+
+    if search:
+        term = f"%{search.strip()}%"
+        q = q.filter(
+            or_(
+                Notification.title.ilike(term),
+                Notification.body.ilike(term),
+                Notification.metadata_json.ilike(term),
+            )
+        )
+
+    agent_q = (agent_name or "all").strip().lower()
+    if agent_q and agent_q != "all":
+        token = agent_q.replace("_", " ").replace("-", " ")
+        q = q.filter(
+            or_(
+                Notification.metadata_json.ilike(f"%{agent_q}%"),
+                Notification.title.ilike(f"%{token}%"),
+                Notification.body.ilike(f"%{token}%"),
+            )
+        )
+
+    total = q.count()
+    total_pages = max(1, math.ceil(total / page_size)) if total > 0 else 1
+    if page > total_pages and total > 0:
+        page = total_pages
+    offset = (page - 1) * page_size
+    rows = q.order_by(Notification.created_at.desc()).offset(offset).limit(page_size).all()
+
+    items = []
+    discovered_agents = set()
+    target_ids = set()
+    parsed_meta = {}
+    for n in rows:
+        meta = None
+        if n.metadata_json:
+            try:
+                meta = json.loads(n.metadata_json)
+            except Exception:
+                meta = None
+        parsed_meta[n.id] = meta
+        if isinstance(meta, dict) and isinstance(meta.get("target_user_id"), int):
+            target_ids.add(meta["target_user_id"])
+
+    user_map = {}
+    if target_ids:
+        targets = db.query(User).filter(User.id.in_(list(target_ids))).all()
+        user_map = {u.id: u for u in targets}
+
+    for n in rows:
+        meta = parsed_meta.get(n.id)
+        inferred = _infer_agent_name(n.title, n.body, meta)
+        discovered_agents.add(inferred)
+        target_user = None
+        target_user_id = None
+        if isinstance(meta, dict) and isinstance(meta.get("target_user_id"), int):
+            target_user_id = meta["target_user_id"]
+            target_user = user_map.get(target_user_id)
+        items.append(
+            {
+                "id": n.id,
+                "agent_name": inferred,
+                "title": n.title,
+                "body": n.body,
+                "trace_id": f"trace-{n.id}",
+                "is_read": n.is_read,
+                "created_at": n.created_at,
+                "metadata": meta,
+                "target_user_id": target_user.id if target_user else target_user_id,
+                "target_user_name": target_user.name if target_user else (meta.get("target_user_name") if isinstance(meta, dict) else None),
+                "target_user_email": target_user.email if target_user else (meta.get("target_user_email") if isinstance(meta, dict) else None),
+                "target_user_role": target_user.role if target_user else (meta.get("target_user_role") if isinstance(meta, dict) else None),
+            }
+        )
+
+    # Build agent options from full filtered dataset, so admin can switch quickly.
+    # Keep this lightweight by looking up only metadata/title/body signatures.
+    all_rows = q.with_entities(Notification.title, Notification.body, Notification.metadata_json).limit(1000).all()
+    for title, body, metadata_json in all_rows:
+        m = None
+        if metadata_json:
+            try:
+                m = json.loads(metadata_json)
+            except Exception:
+                m = None
+        discovered_agents.add(_infer_agent_name(title or "", body or "", m))
+
+    return {
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+        "total_pages": total_pages,
+        "has_next": page < total_pages,
+        "has_prev": page > 1,
+        "agent_options": sorted(a for a in discovered_agents if a),
+        "items": items,
+    }
 
 
 @router.post("/test-delivery")

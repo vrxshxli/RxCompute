@@ -7,25 +7,38 @@ export default function AdminAgentTraces() {
   const { token, apiBase } = useAuth();
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageSize] = useState(20);
+  const [totalPages, setTotalPages] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [agentFilter, setAgentFilter] = useState('all');
+  const [agentOptions, setAgentOptions] = useState([]);
+  const [search, setSearch] = useState('');
 
   const load = async () => {
     if (!token) return;
     setLoading(true);
     try {
-      const res = await fetch(`${apiBase}/notifications/safety-events?limit=150`, {
+      const qs = new URLSearchParams({
+        page: String(page),
+        page_size: String(pageSize),
+        agent_name: agentFilter,
+      });
+      if (search.trim()) qs.set('search', search.trim());
+      const res = await fetch(`${apiBase}/notifications/agent-traces?${qs.toString()}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
       if (res.ok) {
-        const mapped = (Array.isArray(data) ? data : []).map((e) => ({
+        const mapped = (Array.isArray(data?.items) ? data.items : []).map((e) => ({
           id: e.id,
-          agent_name: (e?.metadata?.agent_name || '').toString().trim() || (String(e.title || '').toLowerCase().includes('scheduler') ? 'scheduler_agent' : 'safety_agent'),
-          action: `${e.title} — ${e.body}`,
-          trace_id: `safety-${e.id}`,
+          agent_name: e.agent_name || (e?.metadata?.agent_name || '').toString().trim() || 'safety_agent',
+          action: `${e.title || ''} — ${e.body || ''}`,
+          trace_id: e.trace_id || `trace-${e.id}`,
           confidence:
             Number(e?.metadata?.ocr_details?.[0]?.confidence) ||
             (e?.metadata?.agent_name === 'scheduler_agent' ? 0.93 : 0) ||
-            (e.severity === 'blocked' ? 0.99 : e.severity === 'warning' ? 0.82 : 0.75),
+            (String(e?.title || '').toLowerCase().includes('blocked') ? 0.99 : String(e?.title || '').toLowerCase().includes('warning') ? 0.82 : 0.75),
           metadata: e.metadata || null,
           target_user_name: e.target_user_name || null,
           target_user_email: e.target_user_email || null,
@@ -34,6 +47,9 @@ export default function AdminAgentTraces() {
           created_at: e.created_at,
         }));
         setLogs(mapped);
+        setTotal(Number(data?.total || 0));
+        setTotalPages(Math.max(1, Number(data?.total_pages || 1)));
+        setAgentOptions(Array.isArray(data?.agent_options) ? data.agent_options : []);
       }
     } catch (_) {
     } finally {
@@ -43,7 +59,7 @@ export default function AdminAgentTraces() {
 
   useEffect(() => {
     load();
-  }, [token, apiBase]);
+  }, [token, apiBase, page, pageSize, agentFilter]);
 
   const renderOcrIndicators = (indicators) => {
     if (!indicators || typeof indicators !== 'object') return null;
@@ -70,7 +86,27 @@ export default function AdminAgentTraces() {
   };
 
   return (<div><PageHeader title="Agent Observability" subtitle="Full traceability"/>
-  <div style={{marginBottom:24, display:"flex", gap:8, alignItems:"center"}}><button style={{display:"flex",alignItems:"center",gap:10,padding:"14px 24px",background:T.blue,color:T.white,border:"none",borderRadius:10,cursor:"pointer",fontWeight:600,fontSize:14,boxShadow:"0 4px 12px "+T.blue+"40"}}><ExternalLink size={18}/>Open Langfuse Dashboard →</button><Btn variant="secondary" size="sm" onClick={load}>{loading ? "Refreshing..." : "Refresh"}</Btn><p style={{fontSize:12,color:T.gray400,marginTop:8}}>Safety traces + notifications</p></div>
+  <div style={{marginBottom:16, display:"flex", gap:8, alignItems:"center", flexWrap:"wrap"}}>
+    <button
+      onClick={() => window.open("https://cloud.langfuse.com", "_blank", "noopener,noreferrer")}
+      style={{display:"flex",alignItems:"center",gap:10,padding:"14px 24px",background:T.blue,color:T.white,border:"none",borderRadius:10,cursor:"pointer",fontWeight:600,fontSize:14,boxShadow:"0 4px 12px "+T.blue+"40"}}
+    >
+      <ExternalLink size={18}/>Open Langfuse Dashboard →
+    </button>
+    <select value={agentFilter} onChange={(e)=>{ setPage(1); setAgentFilter(e.target.value); }} style={{padding:"10px 12px", borderRadius:8, border:"1px solid "+T.gray300}}>
+      <option value="all">All agents</option>
+      {agentOptions.map((a) => <option key={a} value={a}>{a}</option>)}
+    </select>
+    <input
+      value={search}
+      onChange={(e)=>setSearch(e.target.value)}
+      onKeyDown={(e)=>{ if (e.key === "Enter") { setPage(1); load(); } }}
+      placeholder="Search trace text..."
+      style={{padding:"10px 12px", borderRadius:8, border:"1px solid "+T.gray300, minWidth:220}}
+    />
+    <Btn variant="secondary" size="sm" onClick={()=>{ setPage(1); load(); }}>{loading ? "Refreshing..." : "Refresh"}</Btn>
+    <p style={{fontSize:12,color:T.gray400,marginTop:8}}>Showing {logs.length} of {total} traces</p>
+  </div>
   {/* Trace cards instead of table */}
   <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(320px, 1fr))", gap:12 }}>
     {logs.map(l => (
@@ -119,6 +155,14 @@ export default function AdminAgentTraces() {
         </div>
       </div>
     ))}
-    {logs.length === 0 ? <div style={{fontSize:12,color:T.gray500}}>No traces found yet. Trigger safety checks from order flow.</div> : null}
-  </div></div>);
+    {logs.length === 0 ? <div style={{fontSize:12,color:T.gray500}}>No traces found yet. Trigger agent flows from order/prediction modules.</div> : null}
+  </div>
+  <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:14}}>
+    <span style={{fontSize:12, color:T.gray500}}>Page {page} / {totalPages}</span>
+    <div style={{display:"flex", gap:8}}>
+      <Btn variant="secondary" size="sm" onClick={()=>setPage((p)=>Math.max(1,p-1))} disabled={page<=1 || loading}>Prev</Btn>
+      <Btn variant="secondary" size="sm" onClick={()=>setPage((p)=>Math.min(totalPages,p+1))} disabled={page>=totalPages || loading}>Next</Btn>
+    </div>
+  </div>
+  </div>);
 }

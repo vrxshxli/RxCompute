@@ -122,6 +122,62 @@ def _resolve_medicine_from_name(db: Session, raw_name: str | None) -> Medicine |
     return db.query(Medicine).filter(Medicine.name.ilike(f"%{txt}%")).order_by(Medicine.name.asc()).first()
 
 
+def _sync_user_medication_after_refill_order(
+    db: Session,
+    *,
+    target_user_id: int,
+    medicine: Medicine,
+    ordered_units: int,
+    dosage_instruction: str,
+    medication_id: int | None = None,
+) -> None:
+    """
+    Reset the patient's medication runout clock right after refill confirmation.
+    Without this sync, home/refill widgets continue to show stale days-left data.
+    """
+    now = datetime.utcnow()
+    refill_units = max(10, int(ordered_units or 1))
+    row = None
+    if medication_id is not None:
+        row = (
+            db.query(UserMedication)
+            .filter(
+                UserMedication.id == medication_id,
+                UserMedication.user_id == target_user_id,
+            )
+            .first()
+        )
+    if not row:
+        row = (
+            db.query(UserMedication)
+            .filter(
+                UserMedication.user_id == target_user_id,
+                UserMedication.medicine_id == medicine.id,
+            )
+            .first()
+        )
+    if row:
+        # Keep at least previous refill size; never reduce patient's configured stock.
+        row.quantity_units = max(int(row.quantity_units or 0), refill_units)
+        row.created_at = now
+        if not (row.dosage_instruction or "").strip():
+            row.dosage_instruction = dosage_instruction or "As prescribed"
+        if not row.frequency_per_day or row.frequency_per_day <= 0:
+            row.frequency_per_day = 1
+        return
+    db.add(
+        UserMedication(
+            user_id=target_user_id,
+            medicine_id=medicine.id,
+            custom_name=medicine.name,
+            dosage_instruction=dosage_instruction or "As prescribed",
+            frequency_per_day=1,
+            quantity_units=refill_units,
+            created_at=now,
+        )
+    )
+
+
 @router.post("/scan")
 def full_scan(
     current_user: User = Depends(get_current_user),
@@ -306,6 +362,14 @@ def confirm_refill_and_create_order(
             rx_required=bool(med.rx_required),
             prescription_file=req.prescription_file,
         )
+    )
+    _sync_user_medication_after_refill_order(
+        db,
+        target_user_id=target_user_id,
+        medicine=med,
+        ordered_units=qty,
+        dosage_instruction=dosage,
+        medication_id=req.medication_id,
     )
     db.commit()
     db.refresh(order)
