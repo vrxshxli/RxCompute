@@ -30,6 +30,7 @@ from routers import (
 from routers import predictions_router
 from routers import order_agent_router
 from routers import exceptions_router
+from routers import demand_forecast_router
 
 
 # ─── Initialize Firebase Admin SDK ────────────────────────
@@ -108,6 +109,7 @@ app.include_router(scheduler_router)
 app.include_router(predictions_router)
 app.include_router(order_agent_router)
 app.include_router(exceptions_router)
+app.include_router(demand_forecast_router)
 
 uploads_path = os.path.join(os.path.dirname(__file__), "uploads")
 os.makedirs(uploads_path, exist_ok=True)
@@ -117,3 +119,4 @@ app.mount("/uploads", StaticFiles(directory=uploads_path), name="uploads")
 @app.get("/", tags=["Health"])
 def health_check():
     return {"status": "ok", "service": "RxCompute API", "version": "1.0.0"}
+A
