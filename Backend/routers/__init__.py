@@ -15,6 +15,7 @@ from routers.scheduler import router as scheduler_router
 from routers.predictions import router as predictions_router
 from routers.order_agent import router as order_agent_router
 from routers.exception_agent import router as exception_agent_router
+from routers.demand_forecast import router as demand_forecast_router
 
 __all__ = [
     "auth_router",
@@ -34,4 +35,5 @@ __all__ = [
     "predictions_router",
     "order_agent_router",
     "exception_agent_router",
+    "demand_forecast_router",
 ]
