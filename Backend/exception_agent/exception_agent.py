@@ -50,6 +50,7 @@ from services.notifications import (
     send_push_to_token,
     send_safety_rejection_email,
 )
+from services.agent_rag import retrieve_agent_context
 from services.webhooks import dispatch_webhook
 
 
@@ -226,6 +227,21 @@ def _handle_exceptions(
 
     user = db.query(User).filter(User.id == user_id).first()
     user_allergies = _parse_allergies(user) if user else []
+    medicine_ids = [int(it.get("medicine_id")) for it in items if isinstance(it, dict) and isinstance(it.get("medicine_id"), int)]
+    query = " ".join(
+        [
+            f"{str(sr.get('medicine_name', ''))} {str(sr.get('rule', ''))} {str(sr.get('message', ''))}"
+            for sr in safety_results
+            if isinstance(sr, dict)
+        ]
+    )
+    rag_context = retrieve_agent_context(
+        db,
+        user_id=user_id if user else None,
+        query=query or "exception classification",
+        medicine_ids=medicine_ids,
+        top_k=12,
+    )
 
     # Build items lookup
     items_map = {it.get("medicine_id"): it for it in items}
@@ -271,9 +287,10 @@ def _handle_exceptions(
 
         # Escalate L2/L3/L4
         if exc.escalation_level in ("L2", "L3", "L4"):
-            _escalate(db, user, exc)
+            _escalate(db, user, exc, rag_context=rag_context)
             result.escalated += 1
             result.notifications_sent += 1
+        _publish_exception_trace(db, user, exc, rag_context)
 
         # Search alternatives for stock issues
         if rule in ("out_of_stock", "insufficient_stock"):
@@ -290,6 +307,10 @@ def _handle_exceptions(
             "severity": exc.severity,
             "auto_action": exc.auto_action,
             "resolved": exc.resolved,
+            "rag_context": {
+                "total_candidates": rag_context.get("total_candidates", 0),
+                "snippet_count": len(rag_context.get("snippets", []) or []),
+            },
         })
 
     db.commit()
@@ -450,7 +471,7 @@ def _classify_exception(
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 @observe(name="exception_escalate")
-def _escalate(db: Session, user: User | None, exc: ExceptionCase):
+def _escalate(db: Session, user: User | None, exc: ExceptionCase, rag_context: dict | None = None):
     """Send notifications to staff based on escalation level."""
 
     if exc.escalation_level == "L2":
@@ -493,6 +514,7 @@ def _escalate(db: Session, user: User | None, exc: ExceptionCase):
                 "target_user_name": user.name if user else None,
                 "target_user_email": user.email if user else None,
                 "target_user_role": user.role if user else None,
+                "rag_context": rag_context or {},
             },
         )
         run_in_background(send_push_to_token, staff.push_token, title, body, staff.id)
@@ -523,6 +545,7 @@ def _escalate(db: Session, user: User | None, exc: ExceptionCase):
                 "target_user_name": user.name if user else None,
                 "target_user_email": user.email if user else None,
                 "target_user_role": user.role if user else None,
+                "rag_context": rag_context or {},
             },
         )
 
@@ -542,6 +565,7 @@ def _escalate(db: Session, user: User | None, exc: ExceptionCase):
                 "medicine_id": exc.medicine_id,
                 "medicine_name": exc.medicine_name,
                 "reasoning": exc.reasoning,
+                "rag_context": rag_context or {},
             },
         )
         run_in_background(send_push_to_token, user.push_token, f"Exception Agent Alert: {exc.medicine_name}", exc.patient_action, user.id)
@@ -563,6 +587,41 @@ def _escalate(db: Session, user: User | None, exc: ExceptionCase):
         "patient_notified": bool(user),
         "webhook": True,
     })
+
+
+def _publish_exception_trace(db: Session, user: User | None, exc: ExceptionCase, rag_context: dict) -> None:
+    """
+    Publish admin-visible trace for every exception classification (including L1).
+    """
+    admins = db.query(User).filter(User.role == "admin").all()
+    title = "Exception Agent Trace"
+    body = f"{exc.exception_type} classified as {exc.escalation_level} for {exc.medicine_name}"
+    metadata = {
+        "agent_name": "exception_agent",
+        "phase": "exception_classified",
+        "exception_type": exc.exception_type,
+        "escalation_level": exc.escalation_level,
+        "severity": exc.severity,
+        "medicine_id": exc.medicine_id,
+        "medicine_name": exc.medicine_name,
+        "reasoning": exc.reasoning,
+        "target_user_id": user.id if user else None,
+        "target_user_name": user.name if user else None,
+        "target_user_email": user.email if user else None,
+        "target_user_role": user.role if user else None,
+        "rag_context": rag_context or {},
+    }
+    for admin in admins:
+        create_notification(
+            db,
+            admin.id,
+            NotificationType.safety,
+            title,
+            body,
+            has_action=True,
+            dedupe_window_minutes=0,
+            metadata=metadata,
+        )
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

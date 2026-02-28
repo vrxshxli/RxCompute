@@ -32,6 +32,8 @@ from prediction_agent.prediction_agent import (
     run_demand_forecast,
 )
 from services.notifications import create_notification, run_in_background, send_push_to_token
+from services.security import enforce_rag_db_guard
+from services.agent_rag import retrieve_agent_context
 
 router = APIRouter(prefix="/predictions", tags=["Prediction Agent"])
 STAFF = {"admin", "pharmacy_store", "warehouse"}
@@ -313,6 +315,20 @@ def confirm_refill_and_create_order(
     target_user = db.query(User).filter(User.id == target_user_id).first()
     if not target_user:
         raise HTTPException(status_code=404, detail="Target user not found")
+    try:
+        enforce_rag_db_guard(
+            actor_role=current_user.role,
+            action="prediction_refill_confirm",
+            free_text_fields=[
+                req.medicine_name or "",
+                req.confirmation_source or "",
+                req.dosage_instruction or "",
+            ],
+        )
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     # Resolve medicine from request first so we can short-circuit duplicate active refill orders
     # before running prediction gates.
@@ -376,6 +392,13 @@ def confirm_refill_and_create_order(
     if payment_method not in {"online", "cod", "upi", "card", "wallet", "netbanking"}:
         payment_method = "online"
     dosage = (req.dosage_instruction or picked.get("dosage") or "As prescribed").strip()
+    rag_context = retrieve_agent_context(
+        db,
+        user_id=target_user_id,
+        query=f"{med.name} {dosage} refill confirmation {req.confirmation_source or ''}",
+        medicine_ids=[med.id],
+        top_k=12,
+    )
     safety_payload = [{
         "medicine_id": med.id,
         "name": med.name,
@@ -408,6 +431,7 @@ def confirm_refill_and_create_order(
                 "confirmation_source": req.confirmation_source,
                 "safety_summary": reason,
                 "safety_results": safety.get("safety_results", []),
+                "rag_context": rag_context,
             },
             f"Prediction refill blocked for {med.name}: {reason}",
         )
@@ -417,6 +441,7 @@ def confirm_refill_and_create_order(
                 "message": reason,
                 "safety_results": safety.get("safety_results", []),
                 "exception_result": exception_result,
+                "rag_context": rag_context,
             },
         )
     if safety.get("has_warnings"):
@@ -436,6 +461,7 @@ def confirm_refill_and_create_order(
                     "message": "Refill requires manual exception review",
                     "safety_results": safety.get("safety_results", []),
                     "exception_result": exception_result,
+                    "rag_context": rag_context,
                 },
             )
 
@@ -512,6 +538,7 @@ def confirm_refill_and_create_order(
             "payment_auto": True,
             "payment_method": payment_method,
             "scheduler_result": scheduler_result,
+            "rag_context": rag_context,
         },
         f"Prediction refill order created: {order.order_uid}",
     )
@@ -524,6 +551,7 @@ def confirm_refill_and_create_order(
         "payment_required": False,
         "payment_method": payment_method,
         "scheduler_result": scheduler_result,
+        "rag_context": rag_context,
     }
 
 

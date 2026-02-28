@@ -18,6 +18,8 @@ from order_agent.order_agent import place_order
 from saftery_policies_agents.graph import process_with_safety
 from schedular_agent.schedular_agent import route_order_to_pharmacy
 from services.notifications import create_notification
+from services.security import enforce_rag_db_guard
+from services.agent_rag import retrieve_agent_context
 
 router = APIRouter(prefix="/order-agent", tags=["Order Agent"])
 
@@ -100,9 +102,30 @@ def execute_full_pipeline(
     """
     if not data.items:
         raise HTTPException(400, "No items")
+    try:
+        enforce_rag_db_guard(
+            actor_role=current_user.role,
+            action="order_agent_execute",
+            free_text_fields=[
+                data.delivery_address or "",
+                data.source or "",
+                " ".join([(it.name or "") for it in data.items]),
+            ],
+        )
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     items_dicts = [it.model_dump() for it in data.items]
     source = (data.source or "api").strip().lower()
+    rag_context = retrieve_agent_context(
+        db,
+        user_id=current_user.id,
+        query=" ".join([f"{it.get('name', '')} {it.get('dosage_instruction', '')}" for it in items_dicts]),
+        medicine_ids=[int(it.get("medicine_id")) for it in items_dicts if it.get("medicine_id") is not None],
+        top_k=10,
+    )
     _publish_agent_trace(
         db,
         actor=current_user,
@@ -111,7 +134,7 @@ def execute_full_pipeline(
         phase="order_agent_execute_start",
         title="Order Agent Trace",
         body=f"Order agent pipeline started via {source}.",
-        payload={"source": source, "item_count": len(items_dicts)},
+        payload={"source": source, "item_count": len(items_dicts), "rag_context": rag_context},
     )
     if source in {"chat", "conversational", "conversational_agent"}:
         _publish_agent_trace(
@@ -155,6 +178,7 @@ def execute_full_pipeline(
             "safety_summary": safety.get("safety_summary", ""),
             "safety_results": safety.get("safety_results", []),
             "exception_result": exception_result,
+            "rag_context": rag_context,
         }
     if safety.get("has_warnings"):
         exception_result = handle_order_exceptions(
@@ -184,6 +208,7 @@ def execute_full_pipeline(
                 "safety_summary": safety.get("safety_summary", ""),
                 "safety_results": safety.get("safety_results", []),
                 "exception_result": exception_result,
+                "rag_context": rag_context,
             }
 
     # STEP 2: Scheduler picks pharmacy
@@ -237,6 +262,7 @@ def execute_full_pipeline(
         "medications_auto_created": result.get("medications_created", 0),
         "execution_time_ms": result.get("execution_time_ms", 0),
         "error": result.get("error", ""),
+        "rag_context": rag_context,
     }
 
 

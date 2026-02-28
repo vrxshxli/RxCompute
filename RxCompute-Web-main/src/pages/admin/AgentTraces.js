@@ -132,6 +132,11 @@ export default function AdminAgentTraces() {
             Target: {l?.metadata?.target_user_name || (l?.metadata?.target_user_id ? `#${l.metadata.target_user_id}` : '-')} · Candidates: {l?.metadata?.candidate_count ?? l?.metadata?.prediction_count ?? '-'} · Alerts: {l?.metadata?.actions?.alerts_created ?? l?.metadata?.alerts_created ?? '-'}
           </div>
         ) : null}
+        {l?.metadata?.rag_context ? (
+          <div style={{ fontSize:11, color:T.gray700, lineHeight:1.5 }}>
+            RAG evidence: candidates {l?.metadata?.rag_context?.total_candidates ?? '-'} · snippets {Array.isArray(l?.metadata?.rag_context?.snippets) ? l.metadata.rag_context.snippets.length : (Array.isArray(l?.metadata?.rag_context?.evidence_by_medicine) ? l.metadata.rag_context.evidence_by_medicine.length : '-')}
+          </div>
+        ) : null}
         {Array.isArray(l?.metadata?.ocr_details) && l.metadata.ocr_details.length ? (
           <div style={{ border:`1px solid ${T.gray200}`, borderRadius:8, padding:10, background:T.gray50 }}>
             {l.metadata.ocr_details.map((d, idx) => (

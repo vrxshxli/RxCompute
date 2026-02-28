@@ -40,6 +40,7 @@ from models.user import User
 from models.warehouse import WarehouseStock, PharmacyStock
 from models.pharmacy_store import PharmacyStore
 from services.notifications import create_notification, run_in_background, send_push_to_token
+from services.agent_rag import retrieve_agent_context
 
 
 # ━━━ CONFIG ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -105,6 +106,7 @@ class MedicineForecast:
 
     # Per-pharmacy breakdown
     pharmacy_demand: list = field(default_factory=list)
+    rag_evidence: list = field(default_factory=list)
 
     reasoning: str = ""
 
@@ -183,6 +185,21 @@ def _publish_demand_forecast_alerts(db: Session, result: ForecastResult, forecas
         f"Forecast completed: {result.total_medicines} medicines, "
         f"critical={result.critical_count}, high={result.high_count}, days={forecast_days}."
     )
+    rag_by_medicine = []
+    for fc in result.forecasts:
+        if fc.risk_level not in {"critical", "high"}:
+            continue
+        rag_by_medicine.append(
+            {
+                "medicine_id": fc.medicine_id,
+                "medicine_name": fc.medicine_name,
+                "risk_level": fc.risk_level,
+                "rag_evidence": fc.rag_evidence[:4] if isinstance(fc.rag_evidence, list) else [],
+            }
+        )
+        if len(rag_by_medicine) >= 12:
+            break
+
     trace_meta = {
         "agent_name": "demand_forecast_agent",
         "phase": "demand_forecast_full_scan",
@@ -194,6 +211,10 @@ def _publish_demand_forecast_alerts(db: Session, result: ForecastResult, forecas
         "low": result.low_count,
         "safe": result.safe_count,
         "reorder_alerts": result.reorder_alerts[:15],
+        "rag_context": {
+            "total_candidates": sum(len(getattr(f, "rag_evidence", []) or []) for f in result.forecasts),
+            "evidence_by_medicine": rag_by_medicine,
+        },
     }
     for admin in admins:
         create_notification(
@@ -225,6 +246,10 @@ def _publish_demand_forecast_alerts(db: Session, result: ForecastResult, forecas
         "critical": result.critical_count,
         "high": result.high_count,
         "reorder_alerts": result.reorder_alerts[:20],
+        "rag_context": {
+            "total_candidates": sum(len(getattr(f, "rag_evidence", []) or []) for f in result.forecasts),
+            "evidence_by_medicine": rag_by_medicine,
+        },
     }
     for u in admins + pharmacists:
         create_notification(
@@ -338,6 +363,14 @@ def _forecast_single(db: Session, med: Medicine, forecast_days: int) -> Medicine
         pzn=med.pzn, price=med.price, forecast_days=forecast_days,
         admin_stock=med.stock or 0,
     )
+    rag_ctx = retrieve_agent_context(
+        db,
+        user_id=None,
+        query=f"demand forecast {med.name} stock velocity trend",
+        medicine_ids=[med.id],
+        top_k=6,
+    )
+    fc.rag_evidence = rag_ctx.get("snippets", []) if isinstance(rag_ctx, dict) else []
 
     # ── Gather inventory ────────────────────────────────
     fc.warehouse_stock = _get_warehouse_stock(db, med.id)

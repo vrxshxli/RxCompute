@@ -25,6 +25,8 @@ from services.notifications import (
     send_order_email_snapshot,
     send_safety_rejection_email,
 )
+from services.security import enforce_rag_db_guard
+from services.agent_rag import retrieve_agent_context
 from services.webhooks import dispatch_webhook
 from schedular_agent.schedular_agent import route_order_to_pharmacy
 
@@ -467,6 +469,20 @@ def create_order(
     db: Session = Depends(get_db),
 ):
     """Create a new order with items."""
+    try:
+        enforce_rag_db_guard(
+            actor_role=current_user.role,
+            action="create_order",
+            free_text_fields=[
+                data.delivery_address or "",
+                " ".join([(it.name or "") for it in data.items]),
+            ],
+        )
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     safety_payload = [
         {
             "medicine_id": it.medicine_id,
@@ -478,15 +494,23 @@ def create_order(
         }
         for it in data.items
     ]
+    rag_context = retrieve_agent_context(
+        db,
+        user_id=current_user.id,
+        query=" ".join([f"{it.get('name', '')} {it.get('dosage_instruction', '')}" for it in safety_payload]),
+        medicine_ids=[int(it.get("medicine_id")) for it in safety_payload if it.get("medicine_id") is not None],
+        top_k=10,
+    )
     safety = process_with_safety(
         user_id=current_user.id,
         matched_medicines=safety_payload,
-        user_message="Order safety check before create_order",
+        user_message=f"Order safety check before create_order | rag_candidates={rag_context.get('total_candidates', 0)}",
     )
     trace_meta = _build_safety_trace_metadata(None, safety, "order_create")
     trace_meta["target_user_id"] = current_user.id
     trace_meta["triggered_by_user_id"] = current_user.id
     trace_meta["triggered_by_role"] = current_user.role
+    trace_meta["rag_context"] = rag_context
     _publish_safety_trace_for_admins(
         db,
         "Safety Agent Trace",
