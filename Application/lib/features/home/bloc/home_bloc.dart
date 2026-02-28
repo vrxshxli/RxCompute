@@ -1,6 +1,8 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
+import 'package:dio/dio.dart';
 import '../../../data/models/chat_models.dart';
+import '../../../data/models/home_summary_model.dart';
 import '../../../data/models/order_model.dart';
 import '../../../data/models/notification_model.dart';
 import '../../../data/models/user_model.dart';
@@ -110,11 +112,42 @@ class HomeBloc extends Bloc<HomeEvent, HomeState> {
   Future<void> _onLoad(LoadHomeDataEvent event, Emitter<HomeState> emit) async {
     emit(state.copyWith(isLoading: true));
     try {
-      final user = await _userRepo.getProfile();
-      final meds = await _medRepo.getUserMedications();
-      final orders = await _orderRepo.getOrders();
-      final notifications = await _notificationRepo.getNotifications();
-      final summary = await _homeRepo.getSummary();
+      UserModel? user = state.user;
+      List<dynamic> meds = const [];
+      List<OrderModel> orders = const [];
+      List<NotificationModel> notifications = const [];
+      HomeSummaryModel? summary;
+      String? softError;
+
+      try {
+        user = await _userRepo.getProfile();
+      } catch (e) {
+        softError = e.toString();
+      }
+      try {
+        meds = await _medRepo.getUserMedications();
+      } catch (e) {
+        softError ??= e.toString();
+      }
+      try {
+        orders = await _orderRepo.getOrders();
+      } catch (e) {
+        if (e is DioException && e.response?.statusCode == 403) {
+          orders = const [];
+        } else {
+          softError ??= e.toString();
+        }
+      }
+      try {
+        notifications = await _notificationRepo.getNotifications();
+      } catch (e) {
+        softError ??= e.toString();
+      }
+      try {
+        summary = await _homeRepo.getSummary();
+      } catch (e) {
+        softError ??= e.toString();
+      }
 
       final activeMeds = meds
           .map(
@@ -127,12 +160,12 @@ class HomeBloc extends Bloc<HomeEvent, HomeState> {
           )
           .toList();
 
-      final alerts = summary.refillAlert == null
+      final alerts = summary?.refillAlert == null
           ? const <Refill>[]
           : [
               Refill(
                 patientId: 'self',
-                medicine: summary.refillAlert!.name,
+                medicine: summary!.refillAlert!.name,
                 medicineId: summary.refillAlert!.medicineId,
                 daysLeft: summary.refillAlert!.daysLeft,
                 risk: summary.refillAlert!.daysLeft <= 2
@@ -145,7 +178,7 @@ class HomeBloc extends Bloc<HomeEvent, HomeState> {
               ),
             ];
 
-      final monthlyInsight = summary.monthlyOrderCount == 0
+      final monthlyInsight = (summary == null || summary.monthlyOrderCount == 0)
           ? 'No order activity this month yet'
           : '${summary.monthlyOrderCount} orders · ₹${summary.monthlyTotalSpend.toStringAsFixed(2)} spent this month';
 
@@ -157,7 +190,7 @@ class HomeBloc extends Bloc<HomeEvent, HomeState> {
         notifications: notifications,
         monthlyInsight: monthlyInsight,
         isLoading: false,
-        error: null,
+        error: softError,
       ));
     } catch (e) {
       emit(state.copyWith(isLoading: false, error: e.toString()));

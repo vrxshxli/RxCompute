@@ -8,9 +8,11 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:google_fonts/google_fonts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/rx_theme_ext.dart';
 import '../../../core/services/local_notification_service.dart';
+import '../../../config/routes.dart';
 import '../../../data/providers/api_provider.dart';
 import '../../../data/models/notification_model.dart';
 import '../../../data/repositories/medicine_repository.dart';
@@ -55,6 +57,7 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
   bool _didInitialNotificationSpeak = false;
   final Set<int> _spokenNotifIds = <int>{};
   final Map<String, DateTime> _speakDedupe = <String, DateTime>{};
+  bool _refillPromptInProgress = false;
 
   @override
   void initState() {
@@ -103,6 +106,7 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
         setState(() => _i = 0);
         _pollAndSpeakNotifications(forceSpeakRefillOnOpen: true);
         context.read<HomeBloc>().add(LoadHomeDataEvent());
+        _maybePromptRefillConfirmation(trigger: 'notification_tap');
       });
     } catch (e) {
       debugPrint('⚠️ Push init failed: $e');
@@ -113,15 +117,120 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _pollAndSpeakNotifications(forceSpeakRefillOnOpen: true);
+      _maybePromptRefillConfirmation(trigger: 'app_resume');
     }
   }
 
   Future<void> _startNotificationVoiceFeed() async {
     await _pollAndSpeakNotifications(forceSpeakRefillOnOpen: true);
+    await _maybePromptRefillConfirmation(trigger: 'app_open');
     _notifPoller?.cancel();
     _notifPoller = Timer.periodic(const Duration(seconds: 12), (_) {
       _pollAndSpeakNotifications();
     });
+  }
+
+  Future<void> _maybePromptRefillConfirmation({required String trigger}) async {
+    if (!mounted || _refillPromptInProgress) return;
+    _refillPromptInProgress = true;
+    try {
+      final profile = await _userRepository.getProfile();
+      final userId = profile.id;
+      final data = await _predictionRepository.getRefillCandidates();
+      final rows = (data['candidates'] is List) ? (data['candidates'] as List) : const [];
+      if (rows.isEmpty) return;
+
+      Map<String, dynamic>? chosen;
+      for (final r in rows) {
+        if (r is! Map) continue;
+        final m = Map<String, dynamic>.from(r);
+        final risk = (m['risk_level'] ?? '').toString().toLowerCase();
+        if (risk == 'overdue' || risk == 'high') {
+          chosen = m;
+          break;
+        }
+      }
+      final firstRow = rows.first;
+      if (chosen == null && firstRow is Map) {
+        chosen = Map<String, dynamic>.from(firstRow);
+      }
+      if (chosen == null) return;
+
+      final medicineId = chosen['medicine_id'];
+      final medicationId = chosen['medication_id'];
+      final medicineName = (chosen['medicine_name'] ?? 'Medicine').toString();
+      final dayKey = DateTime.now().toIso8601String().substring(0, 10);
+      final promptKey = 'refill_prompt_seen_${userId}_${medicineId ?? medicationId ?? medicineName}_$dayKey';
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.getBool(promptKey) == true) return;
+      await prefs.setBool(promptKey, true);
+
+      final qtyCtrl = TextEditingController(text: '${chosen['quantity_units'] ?? 1}');
+      bool takeRefill = true;
+      bool confirmed = false;
+      if (!mounted) return;
+      final accepted = await showDialog<bool>(
+            context: context,
+            barrierDismissible: false,
+            builder: (ctx) => StatefulBuilder(
+              builder: (ctx, setD) => AlertDialog(
+                title: const Text('Refill Confirmation'),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('$medicineName is due for refill.'),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Checkbox(value: takeRefill, onChanged: (v) => setD(() => takeRefill = v == true)),
+                        const Expanded(child: Text('Take this refill now')),
+                      ],
+                    ),
+                    TextField(
+                      controller: qtyCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(labelText: 'Strips/units'),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Checkbox(value: confirmed, onChanged: (v) => setD(() => confirmed = v == true)),
+                        const Expanded(child: Text('I confirm this refill request')),
+                      ],
+                    ),
+                  ],
+                ),
+                actions: [
+                  TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Not now')),
+                  ElevatedButton(
+                    onPressed: (!takeRefill || !confirmed) ? null : () => Navigator.pop(ctx, true),
+                    child: const Text('Confirm'),
+                  ),
+                ],
+              ),
+            ),
+          ) ??
+          false;
+      if (!accepted || !mounted) return;
+      final qty = int.tryParse(qtyCtrl.text.trim()) ?? 1;
+      final res = await _predictionRepository.confirmRefill(
+        medicationId: medicationId is int ? medicationId : null,
+        medicineId: medicineId is int ? medicineId : null,
+        medicineName: medicineName,
+        quantityUnits: qty < 1 ? 1 : qty,
+        confirmationSource: 'popup_$trigger',
+      );
+      final uid = (res['order_uid'] ?? '').toString();
+      await _speak(uid.isNotEmpty ? 'Refill order $uid created. Proceed to payment.' : 'Refill order created. Proceed to payment.');
+      if (!mounted) return;
+      context.read<HomeBloc>().add(LoadHomeDataEvent());
+      Navigator.pushNamed(context, AppRoutes.payment);
+    } catch (_) {
+      // No-op: prediction endpoint may be unavailable for some roles.
+    } finally {
+      _refillPromptInProgress = false;
+    }
   }
 
   Future<void> _pollAndSpeakNotifications({bool forceSpeakRefillOnOpen = false}) async {

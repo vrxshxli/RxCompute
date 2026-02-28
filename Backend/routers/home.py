@@ -52,7 +52,12 @@ def get_home_summary(
     db: Session = Depends(get_db),
 ):
     # Trigger refill reminder check when app home is opened.
-    run_prediction_for_user(current_user.id)
+    run_prediction_for_user(
+        current_user.id,
+        create_alerts=True,
+        once_per_day=True,
+        trigger_reason="app_open_home_summary",
+    )
     trigger_daily_refill_notifications_for_user(db, current_user)
     meds = (
         db.query(UserMedication, Medicine)
