@@ -40,18 +40,23 @@ LANGFUSE TRACING:
 
 import time
 import os
-import json
-import base64
 import mimetypes
 import re
+import io
+import shutil
 from math import ceil
 from urllib import request as urllib_request
-from urllib.error import URLError, HTTPError
 from langfuse.decorators import observe, langfuse_context
-from config import GEMINI_API_KEY, GEMINI_MODEL
 from database import SessionLocal
 from models.medicine import Medicine
 from saftery_policies_agents.state import AgentState, SafetyCheckResult
+
+try:
+    import pytesseract
+    from PIL import Image
+except Exception:  # pragma: no cover
+    pytesseract = None
+    Image = None
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -606,14 +611,22 @@ def _evaluate_interactions(matched: list[dict], med_map: dict[int, Medicine]) ->
 @observe(name="safety_prescription_ocr")
 def _verify_prescription_with_gemini_ocr(medicine_name: str, rx_file: str) -> dict:
     """
-    Strict OCR check:
-      - must be a real prescription-like document
-      - text/handwriting should be readable enough
+    Tesseract OCR-based strict check:
+      - image must contain enough readable prescription text
+      - no inferred/hallucinated details allowed
     """
-    if not GEMINI_API_KEY:
+    del medicine_name
+    if pytesseract is None or Image is None:
         return {
             "ok": False,
-            "reason": "Prescription AI verification is unavailable. Please try again.",
+            "reason": "Tesseract OCR package is unavailable on server.",
+            "confidence": 0.0,
+            "indicators": {},
+        }
+    if shutil.which("tesseract") is None:
+        return {
+            "ok": False,
+            "reason": "Tesseract binary is not installed on server.",
             "confidence": 0.0,
             "indicators": {},
         }
@@ -622,92 +635,47 @@ def _verify_prescription_with_gemini_ocr(medicine_name: str, rx_file: str) -> di
         file_bytes, mime_type = _load_prescription_bytes(rx_file)
     except Exception as exc:
         return {"ok": False, "reason": f"Unable to open prescription file for AI verification: {exc}", "confidence": 0.0, "indicators": {}}
-
-    prompt = (
-        "You are a strict medical safety OCR extractor and validator.\n"
-        "Extract readable text from this image/pdf and validate if it is a real doctor's prescription.\n"
-        "Do NOT infer or invent medicine names, dosage, or duration. Use only text that is visibly present.\n"
-        "Return ONLY valid JSON (no markdown) with keys:\n"
-        "is_prescription (bool), is_clear (bool), doctor_present (bool), "
-        "medicine_or_dosage_present (bool), extracted_text (string), confidence (number 0 to 1), reason (string).\n"
-    )
-    payload = {
-        "contents": [
-            {
-                "parts": [
-                    {"text": prompt},
-                    {"inline_data": {"mime_type": mime_type, "data": base64.b64encode(file_bytes).decode("utf-8")}},
-                ]
-            }
-        ],
-        "generationConfig": {"temperature": 0.0},
-    }
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
-    req = urllib_request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        method="POST",
-        headers={"Content-Type": "application/json"},
-    )
     try:
-        with urllib_request.urlopen(req, timeout=20) as resp:
-            raw = resp.read().decode("utf-8", errors="ignore")
-    except HTTPError as exc:
-        details = exc.read().decode("utf-8", errors="ignore")
-        return {"ok": False, "reason": f"Prescription AI verification failed ({exc.code}): {details[:180]}", "confidence": 0.0, "indicators": {}}
-    except URLError as exc:
-        return {"ok": False, "reason": f"Prescription AI network error: {exc}", "confidence": 0.0, "indicators": {}}
+        extracted_text = _extract_text_with_tesseract(file_bytes, mime_type)
     except Exception as exc:
-        return {"ok": False, "reason": f"Prescription AI error: {exc}", "confidence": 0.0, "indicators": {}}
-
-    try:
-        parsed = json.loads(raw)
-        text = (
-            parsed.get("candidates", [{}])[0]
-            .get("content", {})
-            .get("parts", [{}])[0]
-            .get("text", "")
-            .strip()
-        )
-        text = text.replace("```json", "").replace("```", "").strip()
-        result = json.loads(text)
-    except Exception:
         return {
             "ok": False,
-            "reason": "Prescription AI returned unreadable output. Please upload a clearer prescription.",
+            "reason": f"OCR extraction failed: {exc}",
             "confidence": 0.0,
             "indicators": {},
             "extracted_text": "",
         }
 
-    is_prescription = bool(result.get("is_prescription"))
-    is_clear = bool(result.get("is_clear"))
-    doctor_present = bool(result.get("doctor_present"))
-    med_or_dosage = bool(result.get("medicine_or_dosage_present"))
-    extracted_text = str(result.get("extracted_text", "") or "").strip()
-    confidence = float(result.get("confidence", 0) or 0)
-    reason = str(result.get("reason", "Prescription failed strict OCR checks")).strip()
+    text_norm = _normalize_text(extracted_text)
+    is_prescription = any(k in text_norm for k in {"rx", "prescription", "doctor", "dr", "patient"})
+    dosage_like = bool(re.search(r"\b\d+\s*-\s*\d+\s*-\s*\d+\b", extracted_text)) or any(
+        w in text_norm for w in {"od", "bd", "tid", "qid", "daily", "day", "days"}
+    )
+    medicine_or_dosage_present = dosage_like or bool(re.search(r"\b\d+\s?(mg|mcg|ml|g)\b", text_norm))
+    is_clear = len(text_norm) >= 24 and bool(re.search(r"[a-zA-Z]{3,}", extracted_text))
+    doctor_present = any(k in text_norm for k in {"doctor", "dr", "clinic", "hospital", "mbbs"})
+    confidence = _estimate_ocr_confidence(text_norm, is_prescription, dosage_like, doctor_present)
+    reason = "Prescription OCR validation failed"
 
     _langfuse_output(
         {
             "rule": "prescription_ocr_check",
-            "medicine": medicine_name,
             "is_prescription": is_prescription,
             "is_clear": is_clear,
             "doctor_present": doctor_present,
-            "medicine_or_dosage_present": med_or_dosage,
+            "medicine_or_dosage_present": medicine_or_dosage_present,
             "extracted_text_length": len(extracted_text),
             "confidence": confidence,
             "reason": reason,
         }
     )
     text_ok = len(extracted_text) >= 20 and _looks_like_medical_text(extracted_text)
-    passed = is_prescription and is_clear and doctor_present and med_or_dosage and confidence >= 0.55
+    passed = is_prescription and is_clear and doctor_present and medicine_or_dosage_present and confidence >= 0.55
     indicators = {
         "is_prescription": is_prescription,
         "is_clear": is_clear,
         "doctor_present": doctor_present,
-        "medicine_or_dosage_present": med_or_dosage,
+        "medicine_or_dosage_present": medicine_or_dosage_present,
         "text_detected": text_ok,
     }
     if not passed or not text_ok:
@@ -725,6 +693,29 @@ def _verify_prescription_with_gemini_ocr(medicine_name: str, rx_file: str) -> di
         "indicators": indicators,
         "extracted_text": extracted_text,
     }
+
+
+def _extract_text_with_tesseract(file_bytes: bytes, mime_type: str) -> str:
+    mt = (mime_type or "").lower()
+    if "pdf" in mt:
+        raise RuntimeError("PDF OCR is not enabled with tesseract-only mode. Upload image prescription.")
+    image = Image.open(io.BytesIO(file_bytes))
+    if image.mode not in {"RGB", "L"}:
+        image = image.convert("RGB")
+    return pytesseract.image_to_string(image, config="--oem 3 --psm 6").strip()
+
+
+def _estimate_ocr_confidence(text_norm: str, is_prescription: bool, dosage_like: bool, doctor_present: bool) -> float:
+    score = 0.25
+    if len(text_norm) >= 50:
+        score += 0.2
+    if is_prescription:
+        score += 0.2
+    if dosage_like:
+        score += 0.2
+    if doctor_present:
+        score += 0.15
+    return min(score, 0.95)
 
 
 def _load_prescription_bytes(rx_file: str) -> tuple[bytes, str]:
