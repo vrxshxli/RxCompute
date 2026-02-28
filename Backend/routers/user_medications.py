@@ -74,7 +74,13 @@ def list_user_medications(
         .all()
     )
     result = [_to_out(db, record, med) for record, med in rows]
-    run_prediction_for_user(current_user.id, create_alerts=False, once_per_day=False, trigger_reason="list_user_medications")
+    run_prediction_for_user(
+        current_user.id,
+        create_alerts=False,
+        once_per_day=False,
+        trigger_reason="list_user_medications",
+        publish_trace=False,
+    )
     trigger_daily_refill_notifications_for_user(db, current_user)
     return result
 
@@ -103,7 +109,13 @@ def create_user_medication(
     db.commit()
     db.refresh(row)
     out = _to_out(db, row, med)
-    run_prediction_for_user(current_user.id, create_alerts=False, once_per_day=False, trigger_reason="create_user_medication")
+    run_prediction_for_user(
+        current_user.id,
+        create_alerts=False,
+        once_per_day=False,
+        trigger_reason="create_user_medication",
+        publish_trace=False,
+    )
     trigger_daily_refill_notifications_for_user(db, current_user)
     return out
 
@@ -132,7 +144,13 @@ def update_user_medication(
     db.commit()
     db.refresh(row)
     med = db.query(Medicine).filter(Medicine.id == row.medicine_id).first() if row.medicine_id else None
-    run_prediction_for_user(current_user.id, create_alerts=False, once_per_day=False, trigger_reason="update_user_medication")
+    run_prediction_for_user(
+        current_user.id,
+        create_alerts=False,
+        once_per_day=False,
+        trigger_reason="update_user_medication",
+        publish_trace=False,
+    )
     return _to_out(db, row, med)
 
 

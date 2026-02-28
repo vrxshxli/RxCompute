@@ -109,6 +109,13 @@ class HomeBloc extends Bloc<HomeEvent, HomeState> {
     on<ReorderRefillEvent>(_onReorderRefill);
   }
 
+  String? _captureSoftError(String? current, Object e) {
+    if (e is DioException && e.response?.statusCode == 403) {
+      return current;
+    }
+    return current ?? e.toString();
+  }
+
   Future<void> _onLoad(LoadHomeDataEvent event, Emitter<HomeState> emit) async {
     emit(state.copyWith(isLoading: true));
     try {
@@ -122,31 +129,28 @@ class HomeBloc extends Bloc<HomeEvent, HomeState> {
       try {
         user = await _userRepo.getProfile();
       } catch (e) {
-        softError = e.toString();
+        softError = _captureSoftError(softError, e);
       }
       try {
         meds = await _medRepo.getUserMedications();
       } catch (e) {
-        softError ??= e.toString();
+        softError = _captureSoftError(softError, e);
       }
       try {
         orders = await _orderRepo.getOrders();
       } catch (e) {
-        if (e is DioException && e.response?.statusCode == 403) {
-          orders = const [];
-        } else {
-          softError ??= e.toString();
-        }
+        if (e is DioException && e.response?.statusCode == 403) orders = const [];
+        softError = _captureSoftError(softError, e);
       }
       try {
         notifications = await _notificationRepo.getNotifications();
       } catch (e) {
-        softError ??= e.toString();
+        softError = _captureSoftError(softError, e);
       }
       try {
         summary = await _homeRepo.getSummary();
       } catch (e) {
-        softError ??= e.toString();
+        softError = _captureSoftError(softError, e);
       }
 
       final activeMeds = meds

@@ -63,10 +63,12 @@ def _publish_prediction_order_trace(
     body: str,
 ) -> None:
     admins = db.query(User).filter(User.role == "admin").all()
+    target_user = db.query(User).filter(User.id == target_user_id).first()
     metadata = {
         "agent_name": "prediction_agent",
         "phase": phase,
         "target_user_id": target_user_id,
+        "target_user_name": target_user.name if target_user else None,
         "triggered_by_user_id": actor.id,
         "triggered_by_role": actor.role,
         **(payload or {}),
@@ -79,7 +81,7 @@ def _publish_prediction_order_trace(
             "Prediction Agent Trace",
             body,
             has_action=True,
-            dedupe_window_minutes=0,
+            dedupe_window_minutes=60,
             metadata=metadata,
         )
     db.commit()
@@ -162,7 +164,13 @@ def my_predictions(
 
     Used by: Flutter home tab, medicine brain screen.
     """
-    return run_prediction_for_user(current_user.id)
+    return run_prediction_for_user(
+        current_user.id,
+        create_alerts=False,
+        once_per_day=False,
+        trigger_reason="predictions_me_api",
+        publish_trace=False,
+    )
 
 
 @router.get("/refill/candidates")
@@ -176,7 +184,13 @@ def refill_candidates(
         if current_user.role not in STAFF:
             raise HTTPException(status_code=403, detail="Staff only can query another user")
         resolved_user_id = target_user_id
-    result = run_prediction_for_user(resolved_user_id)
+    result = run_prediction_for_user(
+        resolved_user_id,
+        create_alerts=False,
+        once_per_day=False,
+        trigger_reason="refill_candidates_api",
+        publish_trace=False,
+    )
     preds = [p for p in (result.get("predictions") or []) if int(p.get("days_remaining", 9999)) <= 7]
     for p in preds:
         p["confirmation_required"] = True
@@ -190,7 +204,7 @@ def refill_candidates(
             "candidate_count": len(preds),
             "predictions": preds,
         },
-        f"Refill candidates generated for user #{resolved_user_id}.",
+        f"Refill candidates generated for {current_user.name or f'user #{resolved_user_id}'}",
     )
     return {
         "user_id": resolved_user_id,
@@ -217,7 +231,13 @@ def confirm_refill_and_create_order(
     if not target_user:
         raise HTTPException(status_code=404, detail="Target user not found")
 
-    pred_result = run_prediction_for_user(target_user_id)
+    pred_result = run_prediction_for_user(
+        target_user_id,
+        create_alerts=False,
+        once_per_day=False,
+        trigger_reason="refill_confirm_api",
+        publish_trace=False,
+    )
     pred_rows = pred_result.get("predictions") or []
     if not pred_rows:
         raise HTTPException(status_code=400, detail="No refill prediction available for this user")
@@ -376,4 +396,10 @@ def predict_for_patient(
     """
     if current_user.role not in STAFF:
         raise HTTPException(status_code=403, detail="Staff only")
-    return run_prediction_for_user(user_id)
+    return run_prediction_for_user(
+        user_id,
+        create_alerts=False,
+        once_per_day=False,
+        trigger_reason="predict_for_patient_api",
+        publish_trace=True,
+    )

@@ -68,6 +68,7 @@ def get_home_summary(
         create_alerts=True,
         once_per_day=True,
         trigger_reason="app_open_home_summary",
+        publish_trace=True,
     )
     trigger_daily_refill_notifications_for_user(db, current_user)
     meds = (

@@ -219,6 +219,7 @@ def run_prediction_for_user(
     create_alerts: bool = True,
     once_per_day: bool = False,
     trigger_reason: str = "manual",
+    publish_trace: bool = False,
 ) -> dict:
     """
     Predict refills for a single patient.
@@ -243,21 +244,23 @@ def run_prediction_for_user(
                     created = _create_alert(db, pred)
                     if created:
                         alerts += 1
-        _publish_prediction_trace(
-            db,
-            phase="prediction_single_user",
-            summary={
-                "target_user_id": user_id,
-                "alerts_created": alerts,
-                "auto_actions_executed": bool(create_alerts and should_run_actions),
-                "once_per_day": once_per_day,
-                "trigger_reason": trigger_reason,
-                "prediction_count": len(predictions),
-                "predictions": [p.to_dict() for p in predictions],
-            },
-            title="Prediction Agent Trace",
-            body=f"Single patient refill prediction executed for user #{user_id}.",
-        )
+        if publish_trace:
+            _publish_prediction_trace(
+                db,
+                phase="prediction_single_user",
+                summary={
+                    "target_user_id": user_id,
+                    "target_user_name": user.name or f"User#{user.id}",
+                    "alerts_created": alerts,
+                    "auto_actions_executed": bool(create_alerts and should_run_actions),
+                    "once_per_day": once_per_day,
+                    "trigger_reason": trigger_reason,
+                    "prediction_count": len(predictions),
+                    "predictions": [p.to_dict() for p in predictions],
+                },
+                title="Prediction Agent Trace",
+                body=f"Single patient refill prediction executed for {user.name or f'User#{user.id}'}",
+            )
         db.commit()
     finally:
         db.close()
@@ -701,7 +704,7 @@ def _publish_prediction_trace(
             title,
             body,
             has_action=True,
-            dedupe_window_minutes=0,
+            dedupe_window_minutes=60 * 12,
             metadata=metadata,
         )
     db.commit()

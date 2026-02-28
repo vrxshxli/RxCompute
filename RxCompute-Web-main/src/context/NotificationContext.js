@@ -40,7 +40,8 @@ export function NotificationProvider({ children }) {
       const newUnheard = list.filter((n) => !n.is_read && !soundedIdsRef.current.has(String(n.id)));
       if (newUnheard.length > 0) {
         try {
-          const hasSafety = newUnheard.some((n) => String(n.type || "").toLowerCase() === "safety");
+          const actionable = newUnheard.filter((n) => !String(n.title || "").toLowerCase().includes("agent trace"));
+          const hasSafety = actionable.some((n) => String(n.type || "").toLowerCase() === "safety");
           const audio = new Audio("/rx_tune.wav");
           audio.volume = hasSafety ? 1.0 : 0.9;
           audio.play().catch(() => {});
@@ -51,7 +52,7 @@ export function NotificationProvider({ children }) {
               alarm2.volume = 1.0;
               alarm2.play().catch(() => {});
             }, 900);
-            const safetyNote = newUnheard.find((n) => String(n.type || "").toLowerCase() === "safety");
+            const safetyNote = actionable.find((n) => String(n.type || "").toLowerCase() === "safety");
             if (window.speechSynthesis && safetyNote) {
               const text = `${safetyNote.title || ""} ${safetyNote.body || ""}`.toLowerCase();
               const prefix = text.includes("scheduler") ? "Scheduler agent alert." : "Safety alert.";
