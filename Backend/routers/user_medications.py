@@ -15,16 +15,32 @@ from services.refill_reminders import (
     calculate_days_left,
     trigger_daily_refill_notifications_for_user,
 )
+from prediction_agent.prediction_agent import run_prediction_for_user
 
 router = APIRouter(prefix="/user-medications", tags=["User Medications"])
 
 
-def _to_out(record: UserMedication, med: Medicine | None) -> UserMedicationOut:
+def _best_name(db: Session, med: Medicine | None, custom_name: str | None) -> str:
+    if med:
+        return med.name
+    raw = (custom_name or "").strip()
+    if not raw:
+        return "Medication"
+    guess = (
+        db.query(Medicine)
+        .filter(Medicine.name.ilike(f"{raw}%"))
+        .order_by(Medicine.name.asc())
+        .first()
+    )
+    return guess.name if guess else raw
+
+
+def _to_out(db: Session, record: UserMedication, med: Medicine | None) -> UserMedicationOut:
     days_left = calculate_days_left(record)
     return UserMedicationOut(
         id=record.id,
         medicine_id=record.medicine_id,
-        name=med.name if med else (record.custom_name or "Medication"),
+        name=_best_name(db, med, record.custom_name),
         dosage_instruction=record.dosage_instruction,
         frequency_per_day=record.frequency_per_day,
         quantity_units=record.quantity_units,
@@ -46,7 +62,8 @@ def list_user_medications(
         .order_by(UserMedication.created_at.desc())
         .all()
     )
-    result = [_to_out(record, med) for record, med in rows]
+    result = [_to_out(db, record, med) for record, med in rows]
+    run_prediction_for_user(current_user.id)
     trigger_daily_refill_notifications_for_user(db, current_user)
     return result
 
@@ -74,7 +91,8 @@ def create_user_medication(
     db.add(row)
     db.commit()
     db.refresh(row)
-    out = _to_out(row, med)
+    out = _to_out(db, row, med)
+    run_prediction_for_user(current_user.id)
     trigger_daily_refill_notifications_for_user(db, current_user)
     return out
 
@@ -103,7 +121,8 @@ def update_user_medication(
     db.commit()
     db.refresh(row)
     med = db.query(Medicine).filter(Medicine.id == row.medicine_id).first() if row.medicine_id else None
-    return _to_out(row, med)
+    run_prediction_for_user(current_user.id)
+    return _to_out(db, row, med)
 
 
 @router.delete("/{medication_id}")

@@ -11,16 +11,32 @@ from models.order import Order, OrderStatus
 from models.user_medication import UserMedication
 from schemas.medication import HomeSummaryOut, UserMedicationOut
 from services.refill_reminders import calculate_days_left, trigger_daily_refill_notifications_for_user
+from prediction_agent.prediction_agent import run_prediction_for_user
 
 router = APIRouter(prefix="/home", tags=["Home"])
 
 
-def _to_out(record: UserMedication, med: Medicine | None) -> UserMedicationOut:
+def _best_name(db: Session, med: Medicine | None, custom_name: str | None) -> str:
+    if med:
+        return med.name
+    raw = (custom_name or "").strip()
+    if not raw:
+        return "Medication"
+    guess = (
+        db.query(Medicine)
+        .filter(Medicine.name.ilike(f"{raw}%"))
+        .order_by(Medicine.name.asc())
+        .first()
+    )
+    return guess.name if guess else raw
+
+
+def _to_out(db: Session, record: UserMedication, med: Medicine | None) -> UserMedicationOut:
     days_left = calculate_days_left(record)
     return UserMedicationOut(
         id=record.id,
         medicine_id=record.medicine_id,
-        name=med.name if med else (record.custom_name or "Medication"),
+        name=_best_name(db, med, record.custom_name),
         dosage_instruction=record.dosage_instruction,
         frequency_per_day=record.frequency_per_day,
         quantity_units=record.quantity_units,
@@ -36,6 +52,7 @@ def get_home_summary(
     db: Session = Depends(get_db),
 ):
     # Trigger refill reminder check when app home is opened.
+    run_prediction_for_user(current_user.id)
     trigger_daily_refill_notifications_for_user(db, current_user)
     meds = (
         db.query(UserMedication, Medicine)
@@ -43,7 +60,7 @@ def get_home_summary(
         .filter(UserMedication.user_id == current_user.id)
         .all()
     )
-    med_out = [_to_out(record, med) for record, med in meds]
+    med_out = [_to_out(db, record, med) for record, med in meds]
     refill_alert = min(med_out, key=lambda m: m.days_left) if med_out else None
 
     month_start = datetime.utcnow() - timedelta(days=30)

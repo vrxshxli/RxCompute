@@ -167,8 +167,18 @@ class HomeBloc extends Bloc<HomeEvent, HomeState> {
   Future<void> _onAddMedication(AddMedicationEvent event, Emitter<HomeState> emit) async {
     emit(state.copyWith(isLoading: true, error: null));
     try {
+      int? mappedMedicineId;
+      try {
+        final found = await _medicineRepo.getMedicines(search: event.medicineName);
+        if (found.isNotEmpty) {
+          final q = event.medicineName.toLowerCase().trim();
+          final exact = found.where((m) => m.name.toLowerCase().trim() == q).toList();
+          mappedMedicineId = (exact.isNotEmpty ? exact.first : found.first).id;
+        }
+      } catch (_) {}
       await _medRepo.addMedication(
-        customName: event.medicineName,
+        medicineId: mappedMedicineId,
+        customName: mappedMedicineId == null ? event.medicineName : null,
         dosageInstruction: event.dosageInstruction,
         frequencyPerDay: event.frequencyPerDay,
         quantityUnits: event.quantityUnits,

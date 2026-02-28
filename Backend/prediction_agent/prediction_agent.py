@@ -46,6 +46,7 @@ LANGFUSE TRACING:
 
 import math
 import time
+import uuid
 from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass, field, asdict
 from langfuse.decorators import observe, langfuse_context
@@ -59,6 +60,8 @@ from models.medicine import Medicine
 from models.order import Order, OrderItem, OrderStatus
 from models.notification import NotificationType
 from services.notifications import create_notification, send_push_if_available, send_refill_email
+from saftery_policies_agents.graph import process_with_safety
+from schedular_agent.schedular_agent import route_order_to_pharmacy
 
 
 # ━━━ CONFIG ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -108,6 +111,8 @@ class MedicationPrediction:
     alert_created: bool = False
     push_sent: bool = False
     email_sent: bool = False
+    auto_order_created: bool = False
+    auto_order_uid: str = ""
 
     def to_dict(self):
         return asdict(self)
@@ -553,6 +558,13 @@ def _create_alert(db: Session, pred: MedicationPrediction) -> bool:
         body = f"{pred.medicine_name} has {pred.days_remaining} day(s) left. Plan your refill soon."
 
     # Create in-app notification (with dedup)
+    auto_order = None
+    if pred.risk_level in ("overdue", "high"):
+        auto_order = _auto_create_refill_order(db, pred)
+        if auto_order and auto_order.get("created"):
+            pred.auto_order_created = True
+            pred.auto_order_uid = auto_order.get("order_uid", "")
+
     notif = create_notification(
         db, pred.user_id, NotificationType.refill, title, body,
         has_action=True, dedupe_window_minutes=60 * 12,  # 12 hour dedup
@@ -563,6 +575,9 @@ def _create_alert(db: Session, pred: MedicationPrediction) -> bool:
             "risk_level": pred.risk_level,
             "risk_score": round(pred.risk_score, 1),
             "estimated_runout": pred.estimated_runout_date,
+            "auto_refill_order_created": bool(auto_order and auto_order.get("created")),
+            "auto_refill_order_uid": auto_order.get("order_uid") if auto_order else None,
+            "auto_refill_reason": auto_order.get("reason") if auto_order else None,
         },
     )
 
@@ -590,6 +605,8 @@ def _create_alert(db: Session, pred: MedicationPrediction) -> bool:
         "days_left": pred.days_remaining,
         "push": pred.push_sent,
         "email": pred.email_sent,
+        "auto_order_created": pred.auto_order_created,
+        "auto_order_uid": pred.auto_order_uid,
     })
 
     return True
@@ -684,3 +701,92 @@ def _publish_prediction_trace(
             metadata=metadata,
         )
     db.commit()
+
+
+def _generate_refill_order_uid() -> str:
+    now = datetime.utcnow().strftime("%Y%m%d")
+    short = uuid.uuid4().hex[:6].upper()
+    return f"RFL-{now}-{short}"
+
+
+def _auto_create_refill_order(db: Session, pred: MedicationPrediction) -> dict:
+    """Create a payment-pending refill order if not already active for the same medicine."""
+    if not pred.medicine_id:
+        return {"created": False, "reason": "No medicine_id for auto refill"}
+    if pred.risk_level not in ("overdue", "high"):
+        return {"created": False, "reason": "Risk below auto-refill threshold"}
+
+    existing = (
+        db.query(Order)
+        .join(OrderItem, OrderItem.order_id == Order.id)
+        .filter(
+            Order.user_id == pred.user_id,
+            OrderItem.medicine_id == pred.medicine_id,
+            Order.status.in_(
+                [
+                    OrderStatus.pending,
+                    OrderStatus.confirmed,
+                    OrderStatus.verified,
+                    OrderStatus.picking,
+                    OrderStatus.packed,
+                    OrderStatus.dispatched,
+                ]
+            ),
+            Order.created_at >= datetime.utcnow() - timedelta(days=14),
+        )
+        .order_by(Order.created_at.desc())
+        .first()
+    )
+    if existing:
+        return {"created": False, "reason": f"Active order already exists: {existing.order_uid}", "order_uid": existing.order_uid}
+
+    med = db.query(Medicine).filter(Medicine.id == pred.medicine_id).first()
+    user = db.query(User).filter(User.id == pred.user_id).first()
+    if not med or not user:
+        return {"created": False, "reason": "Medicine/User not found"}
+
+    qty = max(pred.quantity_units, 1)
+    payload = [{
+        "medicine_id": med.id,
+        "name": med.name,
+        "quantity": qty,
+        "dosage_instruction": pred.dosage or "As prescribed",
+        "strips_count": qty,
+    }]
+    safety = process_with_safety(
+        user_id=pred.user_id,
+        matched_medicines=payload,
+        user_message="Prediction auto refill order safety check",
+    )
+    if safety.get("has_blocks"):
+        return {"created": False, "reason": (safety.get("safety_summary") or "Blocked by safety checks").strip()}
+
+    scheduler = route_order_to_pharmacy(user_id=pred.user_id, order_items=payload, dry_run=False)
+    order = Order(
+        order_uid=_generate_refill_order_uid(),
+        user_id=pred.user_id,
+        status=OrderStatus.pending,
+        total=float(med.price) * qty,
+        pharmacy=scheduler.get("assigned_pharmacy"),
+        payment_method=None,
+        delivery_address=user.location_text,
+        delivery_lat=user.location_lat,
+        delivery_lng=user.location_lng,
+    )
+    db.add(order)
+    db.flush()
+    db.add(
+        OrderItem(
+            order_id=order.id,
+            medicine_id=med.id,
+            name=med.name,
+            quantity=qty,
+            price=float(med.price),
+            dosage_instruction=pred.dosage or "As prescribed",
+            strips_count=qty,
+            rx_required=bool(med.rx_required),
+            prescription_file=None,
+        )
+    )
+    db.commit()
+    return {"created": True, "order_uid": order.order_uid, "reason": "Auto refill order created (payment pending)"}
