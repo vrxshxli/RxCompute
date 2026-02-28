@@ -13,6 +13,7 @@ from models.order import Order, OrderItem, OrderStatus
 from models.medicine import Medicine
 from models.pharmacy_store import PharmacyStore
 from models.notification import NotificationType
+from models.user_medication import UserMedication
 from schemas.order import OrderCreate, OrderOut, OrderStatusUpdate
 from saftery_policies_agents.graph import process_with_safety
 from services.notifications import (
@@ -194,6 +195,39 @@ def _publish_scheduler_alert(
             metadata=metadata,
         )
         run_in_background(send_push_to_token, user.push_token, title, body, user.id)
+
+
+def _restock_user_medications_on_refill_delivery(db: Session, order: Order) -> None:
+    if not (order.order_uid or "").upper().startswith("RFL-"):
+        return
+    now = datetime.utcnow()
+    for it in order.items:
+        if not it.medicine_id:
+            continue
+        row = (
+            db.query(UserMedication)
+            .filter(UserMedication.user_id == order.user_id, UserMedication.medicine_id == it.medicine_id)
+            .first()
+        )
+        refill_units = max(10, int(it.strips_count or it.quantity or 1))
+        if row:
+            row.quantity_units = refill_units
+            row.created_at = now
+            if not row.dosage_instruction:
+                row.dosage_instruction = it.dosage_instruction or "As prescribed"
+            if not row.frequency_per_day or row.frequency_per_day <= 0:
+                row.frequency_per_day = 1
+        else:
+            db.add(
+                UserMedication(
+                    user_id=order.user_id,
+                    medicine_id=it.medicine_id,
+                    custom_name=it.name,
+                    dosage_instruction=it.dosage_instruction or "As prescribed",
+                    frequency_per_day=1,
+                    quantity_units=refill_units,
+                )
+            )
 
 
 def _auto_review_pending_for_pharmacy(db: Session, pharmacy_user: User) -> None:
@@ -671,6 +705,9 @@ def update_order_status(
             order.pharmacy = store.node_id if store else node_id
     db.commit()
     db.refresh(order)
+    if new_status == OrderStatus.delivered:
+        _restock_user_medications_on_refill_delivery(db, order)
+        db.commit()
 
     if new_status.value != OrderStatus.pending.value:
         order_owner = db.query(User).filter(User.id == order.user_id).first()

@@ -243,9 +243,9 @@ def list_safety_events(
                 "severity": row_severity,
                 "metadata": metadata,
                 "target_user_id": target_user.id if target_user else (metadata.get("target_user_id") if isinstance(metadata, dict) else None),
-                "target_user_name": target_user.name if target_user else None,
-                "target_user_email": target_user.email if target_user else None,
-                "target_user_role": target_user.role if target_user else None,
+                "target_user_name": target_user.name if target_user else (metadata.get("target_user_name") if isinstance(metadata, dict) else None),
+                "target_user_email": target_user.email if target_user else (metadata.get("target_user_email") if isinstance(metadata, dict) else None),
+                "target_user_role": target_user.role if target_user else (metadata.get("target_user_role") if isinstance(metadata, dict) else None),
             }
         )
     return out

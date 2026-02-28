@@ -195,17 +195,6 @@ def refill_candidates(
     for p in preds:
         p["confirmation_required"] = True
         p["payment_auto"] = False
-    _publish_prediction_order_trace(
-        db,
-        current_user,
-        resolved_user_id,
-        "prediction_refill_candidates",
-        {
-            "candidate_count": len(preds),
-            "predictions": preds,
-        },
-        f"Refill candidates generated for {current_user.name or f'user #{resolved_user_id}'}",
-    )
     return {
         "user_id": resolved_user_id,
         "candidates": preds,

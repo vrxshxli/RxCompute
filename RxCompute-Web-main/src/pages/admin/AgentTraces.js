@@ -81,7 +81,7 @@ export default function AdminAgentTraces() {
         </div>
         <div style={{ fontSize:13, color:T.gray800, lineHeight:1.5 }}>{l.action}</div>
         <div style={{ fontSize:11, color:T.gray600 }}>
-          Target user: {l.target_user_name || l.target_user_email || (l.target_user_id ? `User #${l.target_user_id}` : '-')} {l.target_user_role ? `(${l.target_user_role})` : ''}
+          Target user: {l.target_user_name || l?.metadata?.target_user_name || l.target_user_email || (l.target_user_id ? `User #${l.target_user_id}` : '-')} {l.target_user_role ? `(${l.target_user_role})` : ''}
         </div>
         <div style={{ fontSize:11, color:T.gray500 }}>
           Phase: {l?.metadata?.phase || '-'} · Triggered by: {l?.metadata?.triggered_by_role || '-'} {l?.metadata?.triggered_by_user_id ? `#${l.metadata.triggered_by_user_id}` : ''}
@@ -93,7 +93,7 @@ export default function AdminAgentTraces() {
         ) : null}
         {l?.metadata?.agent_name === 'prediction_agent' ? (
           <div style={{ fontSize:11, color:T.gray700, lineHeight:1.5 }}>
-            Target: {l?.metadata?.target_user_id ? `#${l.metadata.target_user_id}` : '-'} · Candidates: {l?.metadata?.candidate_count ?? l?.metadata?.prediction_count ?? '-'} · Alerts: {l?.metadata?.actions?.alerts_created ?? l?.metadata?.alerts_created ?? '-'}
+            Target: {l?.metadata?.target_user_name || (l?.metadata?.target_user_id ? `#${l.metadata.target_user_id}` : '-')} · Candidates: {l?.metadata?.candidate_count ?? l?.metadata?.prediction_count ?? '-'} · Alerts: {l?.metadata?.actions?.alerts_created ?? l?.metadata?.alerts_created ?? '-'}
           </div>
         ) : null}
         {Array.isArray(l?.metadata?.ocr_details) && l.metadata.ocr_details.length ? (
