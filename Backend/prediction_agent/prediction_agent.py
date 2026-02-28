@@ -411,12 +411,13 @@ def _predict_single_medication(
 ) -> MedicationPrediction:
     now = datetime.now(timezone.utc)
 
+    resolved_name = med.name if med else _resolve_prediction_name(db, record.custom_name)
     pred = MedicationPrediction(
         user_id=user.id,
         user_name=user.name or f"User#{user.id}",
         medication_id=record.id,
         medicine_id=record.medicine_id,
-        medicine_name=med.name if med else (record.custom_name or "Medication"),
+        medicine_name=resolved_name,
         dosage=record.dosage_instruction,
         frequency_per_day=record.frequency_per_day,
         quantity_units=record.quantity_units,
@@ -731,3 +732,19 @@ def _claim_daily_prediction_run(db: Session, user_id: int, trigger_reason: str) 
     )
     db.commit()
     return True
+
+
+def _resolve_prediction_name(db: Session, custom_name: str | None) -> str:
+    raw = (custom_name or "").strip()
+    if not raw:
+        return "Medication"
+    exact = db.query(Medicine).filter(Medicine.name.ilike(raw)).first()
+    if exact:
+        return exact.name
+    key = raw[:4].strip()
+    if key:
+        p = db.query(Medicine).filter(Medicine.name.ilike(f"{key}%")).order_by(Medicine.name.asc()).first()
+        if p:
+            return p.name
+    c = db.query(Medicine).filter(Medicine.name.ilike(f"%{raw}%")).order_by(Medicine.name.asc()).first()
+    return c.name if c else raw

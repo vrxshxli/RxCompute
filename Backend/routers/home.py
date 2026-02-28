@@ -22,12 +22,23 @@ def _best_name(db: Session, med: Medicine | None, custom_name: str | None) -> st
     raw = (custom_name or "").strip()
     if not raw:
         return "Medication"
-    guess = (
-        db.query(Medicine)
-        .filter(Medicine.name.ilike(f"{raw}%"))
-        .order_by(Medicine.name.asc())
-        .first()
-    )
+    guess = db.query(Medicine).filter(Medicine.name.ilike(raw)).first()
+    if not guess:
+        key = raw[:4].strip()
+        if key:
+            guess = (
+                db.query(Medicine)
+                .filter(Medicine.name.ilike(f"{key}%"))
+                .order_by(Medicine.name.asc())
+                .first()
+            )
+    if not guess:
+        guess = (
+            db.query(Medicine)
+            .filter(Medicine.name.ilike(f"%{raw}%"))
+            .order_by(Medicine.name.asc())
+            .first()
+        )
     return guess.name if guess else raw
 
 

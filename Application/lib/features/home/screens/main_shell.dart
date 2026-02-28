@@ -165,7 +165,7 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
       if (prefs.getBool(promptKey) == true) return;
       await prefs.setBool(promptKey, true);
 
-      final qtyCtrl = TextEditingController(text: '${chosen['quantity_units'] ?? 1}');
+      final qtyCtrl = TextEditingController(text: '1');
       bool takeRefill = true;
       bool confirmed = false;
       if (!mounted) return;
@@ -226,8 +226,12 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
       if (!mounted) return;
       context.read<HomeBloc>().add(LoadHomeDataEvent());
       Navigator.pushNamed(context, AppRoutes.payment);
-    } catch (_) {
-      // No-op: prediction endpoint may be unavailable for some roles.
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Refill confirm failed: $e')),
+        );
+      }
     } finally {
       _refillPromptInProgress = false;
     }

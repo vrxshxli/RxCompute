@@ -22,6 +22,7 @@ from models.medicine import Medicine
 from models.notification import NotificationType
 from models.order import Order, OrderItem, OrderStatus
 from models.user import User
+from models.user_medication import UserMedication
 from saftery_policies_agents.graph import process_with_safety
 from schedular_agent.schedular_agent import route_order_to_pharmacy
 from prediction_agent.prediction_agent import (
@@ -99,6 +100,24 @@ def _select_prediction(preds: list[dict], req: RefillConfirmRequest) -> dict | N
             if q and q in str(p.get("medicine_name", "")).lower():
                 return p
     return preds[0] if preds else None
+
+
+def _resolve_medicine_from_name(db: Session, raw_name: str | None) -> Medicine | None:
+    txt = (raw_name or "").strip()
+    if not txt:
+        return None
+    exact = db.query(Medicine).filter(Medicine.name.ilike(txt)).first()
+    if exact:
+        return exact
+    prefix = txt[:4].strip()
+    if prefix:
+        by_prefix = db.query(Medicine).filter(Medicine.name.ilike(f"{prefix}%")).order_by(Medicine.name.asc()).first()
+        if by_prefix:
+            return by_prefix
+        by_contains = db.query(Medicine).filter(Medicine.name.ilike(f"%{prefix}%")).order_by(Medicine.name.asc()).first()
+        if by_contains:
+            return by_contains
+    return db.query(Medicine).filter(Medicine.name.ilike(f"%{txt}%")).order_by(Medicine.name.asc()).first()
 
 
 @router.post("/scan")
@@ -207,11 +226,15 @@ def confirm_refill_and_create_order(
         raise HTTPException(status_code=400, detail="No matching prediction found")
 
     medicine_id = req.medicine_id or picked.get("medicine_id")
-    if not medicine_id:
-        raise HTTPException(status_code=400, detail="Selected medication is custom-only. Choose medicine with valid medicine_id.")
-    med = db.query(Medicine).filter(Medicine.id == medicine_id).first()
+    med = db.query(Medicine).filter(Medicine.id == medicine_id).first() if medicine_id else None
+    if not med and req.medication_id:
+        rec = db.query(UserMedication).filter(UserMedication.id == req.medication_id, UserMedication.user_id == target_user_id).first()
+        if rec and rec.medicine_id:
+            med = db.query(Medicine).filter(Medicine.id == rec.medicine_id).first()
     if not med:
-        raise HTTPException(status_code=404, detail="Medicine not found")
+        med = _resolve_medicine_from_name(db, req.medicine_name or picked.get("medicine_name"))
+    if not med:
+        raise HTTPException(status_code=404, detail="Medicine not found for refill confirmation")
 
     qty = max(1, int(req.quantity_units or 1))
     dosage = (req.dosage_instruction or picked.get("dosage") or "As prescribed").strip()
