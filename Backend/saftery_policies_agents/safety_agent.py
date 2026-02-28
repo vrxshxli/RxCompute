@@ -636,7 +636,7 @@ def _verify_prescription_with_gemini_ocr(medicine_name: str, rx_file: str) -> di
     except Exception as exc:
         return {"ok": False, "reason": f"Unable to open prescription file for AI verification: {exc}", "confidence": 0.0, "indicators": {}}
     try:
-        extracted_text = _extract_text_with_tesseract(file_bytes, mime_type)
+        extracted_text, ocr_conf = _extract_text_with_tesseract(file_bytes, mime_type)
     except Exception as exc:
         return {
             "ok": False,
@@ -647,14 +647,16 @@ def _verify_prescription_with_gemini_ocr(medicine_name: str, rx_file: str) -> di
         }
 
     text_norm = _normalize_text(extracted_text)
-    is_prescription = any(k in text_norm for k in {"rx", "prescription", "doctor", "dr", "patient"})
+    rx_markers = {"rx", "prescription", "doctor", "patient", "clinic", "hospital"}
+    marker_hits = sum(1 for k in rx_markers if k in text_norm)
+    is_prescription = marker_hits >= 2
     dosage_like = bool(re.search(r"\b\d+\s*-\s*\d+\s*-\s*\d+\b", extracted_text)) or any(
         w in text_norm for w in {"od", "bd", "tid", "qid", "daily", "day", "days"}
     )
     medicine_or_dosage_present = dosage_like or bool(re.search(r"\b\d+\s?(mg|mcg|ml|g)\b", text_norm))
-    is_clear = len(text_norm) >= 24 and bool(re.search(r"[a-zA-Z]{3,}", extracted_text))
+    is_clear = len(text_norm) >= 40 and len(re.findall(r"[a-zA-Z]{3,}", extracted_text)) >= 6
     doctor_present = any(k in text_norm for k in {"doctor", "dr", "clinic", "hospital", "mbbs"})
-    confidence = _estimate_ocr_confidence(text_norm, is_prescription, dosage_like, doctor_present)
+    confidence = _estimate_ocr_confidence(text_norm, is_prescription, dosage_like, doctor_present, ocr_conf)
     reason = "Prescription OCR validation failed"
 
     _langfuse_output(
@@ -665,18 +667,21 @@ def _verify_prescription_with_gemini_ocr(medicine_name: str, rx_file: str) -> di
             "doctor_present": doctor_present,
             "medicine_or_dosage_present": medicine_or_dosage_present,
             "extracted_text_length": len(extracted_text),
+            "ocr_confidence": ocr_conf,
             "confidence": confidence,
             "reason": reason,
         }
     )
-    text_ok = len(extracted_text) >= 20 and _looks_like_medical_text(extracted_text)
-    passed = is_prescription and is_clear and doctor_present and medicine_or_dosage_present and confidence >= 0.55
+    text_ok = len(extracted_text) >= 30 and _looks_like_medical_text(extracted_text) and ocr_conf >= 40.0
+    passed = is_prescription and is_clear and doctor_present and medicine_or_dosage_present and confidence >= 0.65
     indicators = {
         "is_prescription": is_prescription,
         "is_clear": is_clear,
         "doctor_present": doctor_present,
         "medicine_or_dosage_present": medicine_or_dosage_present,
         "text_detected": text_ok,
+        "ocr_confidence": ocr_conf,
+        "marker_hits": marker_hits,
     }
     if not passed or not text_ok:
         return {
@@ -695,17 +700,19 @@ def _verify_prescription_with_gemini_ocr(medicine_name: str, rx_file: str) -> di
     }
 
 
-def _extract_text_with_tesseract(file_bytes: bytes, mime_type: str) -> str:
+def _extract_text_with_tesseract(file_bytes: bytes, mime_type: str) -> tuple[str, float]:
     mt = (mime_type or "").lower()
     if "pdf" in mt:
         raise RuntimeError("PDF OCR is not enabled with tesseract-only mode. Upload image prescription.")
     image = Image.open(io.BytesIO(file_bytes))
     if image.mode not in {"RGB", "L"}:
         image = image.convert("RGB")
-    return pytesseract.image_to_string(image, config="--oem 3 --psm 6").strip()
+    text = pytesseract.image_to_string(image, config="--oem 3 --psm 6").strip()
+    conf = _average_ocr_confidence(image)
+    return text, conf
 
 
-def _estimate_ocr_confidence(text_norm: str, is_prescription: bool, dosage_like: bool, doctor_present: bool) -> float:
+def _estimate_ocr_confidence(text_norm: str, is_prescription: bool, dosage_like: bool, doctor_present: bool, ocr_conf: float) -> float:
     score = 0.25
     if len(text_norm) >= 50:
         score += 0.2
@@ -715,7 +722,27 @@ def _estimate_ocr_confidence(text_norm: str, is_prescription: bool, dosage_like:
         score += 0.2
     if doctor_present:
         score += 0.15
+    if ocr_conf >= 50:
+        score += 0.15
     return min(score, 0.95)
+
+
+def _average_ocr_confidence(image) -> float:
+    try:
+        data = pytesseract.image_to_data(image, output_type=pytesseract.Output.DICT)
+        confs = []
+        for raw in data.get("conf", []):
+            try:
+                v = float(raw)
+            except Exception:
+                continue
+            if v >= 0:
+                confs.append(v)
+        if not confs:
+            return 0.0
+        return sum(confs) / len(confs)
+    except Exception:
+        return 0.0
 
 
 def _load_prescription_bytes(rx_file: str) -> tuple[bytes, str]:
@@ -771,7 +798,10 @@ def _prescription_mentions_medicine(text: str, medicine_name: str) -> bool:
     first = name_tokens[0]
     if first not in t:
         return False
-    return any(tok in t for tok in name_tokens)
+    hit_count = sum(1 for tok in name_tokens if tok in t)
+    if len(name_tokens) >= 2:
+        return hit_count >= 2
+    return hit_count >= 1
 
 
 def _prescription_mentions_dosage(text: str, dosage_instruction: str) -> bool:
