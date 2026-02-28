@@ -249,6 +249,7 @@ def _restock_user_medications_on_refill_delivery(db: Session, order: Order) -> N
         return max(pack_count * units_per_pack, pack_count)
 
     now = datetime.utcnow()
+    is_refill_order = (order.order_uid or "").upper().startswith("RFL-")
     med_ids = [int(it.medicine_id) for it in order.items if it.medicine_id]
     med_rows = db.query(Medicine).filter(Medicine.id.in_(med_ids)).all() if med_ids else []
     med_map = {m.id: m for m in med_rows}
@@ -262,6 +263,8 @@ def _restock_user_medications_on_refill_delivery(db: Session, order: Order) -> N
             .first()
         )
         dispensed_units = _dispensed_units(it, med)
+        if is_refill_order:
+            dispensed_units = max(dispensed_units, 10)
         freq_from_dosage = _estimate_frequency_per_day(it.dosage_instruction)
         if row:
             remaining_before_delivery = _remaining_units_now(row, now)

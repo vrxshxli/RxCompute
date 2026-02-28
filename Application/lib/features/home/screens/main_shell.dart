@@ -59,6 +59,11 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
   bool _refillPromptInProgress = false;
   DateTime? _lastHomeRefreshFromNotif;
   bool _autoVoiceStartQueued = false;
+  bool _micActionInProgress = false;
+  bool _speechStartInProgress = false;
+  DateTime? _lastVoiceUnavailablePromptAt;
+  String _lastSpokenText = '';
+  DateTime? _lastSpokenAt;
 
   @override
   void initState() {
@@ -136,11 +141,12 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
 
   void _queueAutoVoiceStart() {
     if (_autoVoiceStartQueued) return;
+    if (_isListening || _speechStartInProgress) return;
     _autoVoiceStartQueued = true;
     Future.delayed(const Duration(milliseconds: 1100), () async {
       if (!mounted) return;
       _autoVoiceStartQueued = false;
-      if (!_isListening) await _startListeningWithRetry();
+      if (!_isListening && !_speechStartInProgress) await _startListeningWithRetry(fromAutoTrigger: true);
     });
   }
 
@@ -439,19 +445,31 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
     return _speechReady;
   }
 
-  Future<void> _startListeningWithRetry() async {
+  Future<void> _startListeningWithRetry({bool fromAutoTrigger = false}) async {
+    if (_speechStartInProgress) return;
+    _speechStartInProgress = true;
     final ok = await _ensureSpeechReady();
     if (!ok) {
-      await _speak(
-        _voiceLanguage == 'hi-IN'
-            ? 'वॉइस रिकग्निशन अभी उपलब्ध नहीं है।'
-            : _voiceLanguage == 'mr-IN'
-                ? 'व्हॉइस रिकग्निशन सध्या उपलब्ध नाही.'
-                : 'Voice recognition is not available right now.',
-      );
+      final now = DateTime.now();
+      final shouldPrompt = _lastVoiceUnavailablePromptAt == null ||
+          now.difference(_lastVoiceUnavailablePromptAt!).inSeconds > 25;
+      if (!fromAutoTrigger && shouldPrompt) {
+        _lastVoiceUnavailablePromptAt = now;
+        await _speak(
+          _voiceLanguage == 'hi-IN'
+              ? 'वॉइस रिकग्निशन अभी उपलब्ध नहीं है।'
+              : _voiceLanguage == 'mr-IN'
+                  ? 'व्हॉइस रिकग्निशन सध्या उपलब्ध नाही.'
+                  : 'Voice recognition is not available right now.',
+        );
+      }
+      _speechStartInProgress = false;
       return;
     }
-    if (_isListening) return;
+    if (_isListening) {
+      _speechStartInProgress = false;
+      return;
+    }
     try {
       await _speech.listen(
         localeId: _speechLocale,
@@ -467,11 +485,22 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
       if (mounted) setState(() => _isListening = true);
     } catch (_) {
       if (mounted) setState(() => _isListening = false);
+    } finally {
+      _speechStartInProgress = false;
     }
   }
 
   Future<void> _speak(String text) async {
     if (text.trim().isEmpty) return;
+    final normalized = text.trim().toLowerCase();
+    final now = DateTime.now();
+    if (_lastSpokenText == normalized &&
+        _lastSpokenAt != null &&
+        now.difference(_lastSpokenAt!).inMilliseconds < 1800) {
+      return;
+    }
+    _lastSpokenText = normalized;
+    _lastSpokenAt = now;
     try {
       await _tts.setLanguage(_voiceLanguage);
       await _tts.speak(text);
@@ -675,21 +704,32 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
   }
 
   Future<void> _toggleListening() async {
+    if (_micActionInProgress) return;
+    _micActionInProgress = true;
     final ok = await _ensureSpeechReady();
     if (!ok) {
-      await _speak(_voiceLanguage == 'hi-IN'
-          ? 'वॉइस रिकग्निशन उपलब्ध नहीं है।'
-          : _voiceLanguage == 'mr-IN'
-              ? 'व्हॉइस रिकग्निशन उपलब्ध नाही.'
-              : 'Voice recognition is not available.');
+      final now = DateTime.now();
+      final shouldPrompt = _lastVoiceUnavailablePromptAt == null ||
+          now.difference(_lastVoiceUnavailablePromptAt!).inSeconds > 25;
+      if (shouldPrompt) {
+        _lastVoiceUnavailablePromptAt = now;
+        await _speak(_voiceLanguage == 'hi-IN'
+            ? 'वॉइस रिकग्निशन उपलब्ध नहीं है।'
+            : _voiceLanguage == 'mr-IN'
+                ? 'व्हॉइस रिकग्निशन उपलब्ध नाही.'
+                : 'Voice recognition is not available.');
+      }
+      _micActionInProgress = false;
       return;
     }
     if (_isListening) {
       await _speech.stop();
       if (mounted) setState(() => _isListening = false);
+      _micActionInProgress = false;
       return;
     }
-    await _startListeningWithRetry();
+    await _startListeningWithRetry(fromAutoTrigger: false);
+    _micActionInProgress = false;
   }
 
   int _parseVoiceQuantity(String txt) {

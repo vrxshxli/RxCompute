@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
+import 'package:flutter_tts/flutter_tts.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/rx_theme_ext.dart';
 import '../../../core/widgets/shared_widgets.dart';
@@ -22,7 +23,10 @@ class _CS extends State<ChatScreen> {
   final _sc = ScrollController();
   final _picker = ImagePicker();
   final stt.SpeechToText _speech = stt.SpeechToText();
+  final FlutterTts _tts = FlutterTts();
   bool _speechReady = false;
+  final Set<String> _spokenMessageIds = <String>{};
+  bool _spokeVoiceTextHint = false;
 
   @override
   void initState() {
@@ -41,12 +45,17 @@ class _CS extends State<ChatScreen> {
         }
       },
     );
+    try {
+      await _tts.setLanguage('hi-IN');
+      await _tts.setSpeechRate(0.45);
+    } catch (_) {}
     if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
     _speech.stop();
+    _tts.stop();
     _tc.dispose();
     _sc.dispose();
     super.dispose();
@@ -68,7 +77,10 @@ class _CS extends State<ChatScreen> {
   }
 
   Future<void> _toggleVoice(ChatState state) async {
-    if (!_speechReady) return;
+    if (!_speechReady) {
+      await _speakText('Voice recognition is not available right now.');
+      return;
+    }
     if (state.isRecording) {
       await _speech.stop();
       if (mounted) context.read<ChatBloc>().add(ToggleRecordingEvent());
@@ -94,11 +106,30 @@ class _CS extends State<ChatScreen> {
         if (_sc.hasClients) _sc.animateTo(_sc.position.maxScrollExtent + 100, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
       });
 
+  Future<void> _speakText(String text) async {
+    if (text.trim().isEmpty) return;
+    try {
+      await _tts.speak(text);
+    } catch (_) {}
+  }
+
   @override
   Widget build(BuildContext context) {
     final r = context.rx;
     return BlocConsumer<ChatBloc, ChatState>(
-      listener: (context, state) => _scrollEnd(),
+      listener: (context, state) async {
+        _scrollEnd();
+        if (!_spokeVoiceTextHint && state.messages.isNotEmpty) {
+          _spokeVoiceTextHint = true;
+          await _speakText('You can talk with voice or text in chat. Tap the mic to speak.');
+        }
+        if (state.messages.isEmpty) return;
+        final last = state.messages.last;
+        if (last.isUser) return;
+        if (_spokenMessageIds.contains(last.id)) return;
+        _spokenMessageIds.add(last.id);
+        await _speakText(last.text);
+      },
       builder: (context, state) {
         return Scaffold(
           backgroundColor: r.bg,

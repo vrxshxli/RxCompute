@@ -79,20 +79,29 @@ def _reconcile_tracking_from_delivered_orders(db: Session, user_id: int) -> None
 
     changed = False
     for medicine_id, (order, item, med) in latest_by_medicine.items():
-        delivered_at = _to_naive_utc(order.updated_at or order.created_at)
+        # Use explicit delivered transition timestamp when available.
+        delivered_at = _to_naive_utc(order.last_status_updated_at or order.updated_at or order.created_at)
         track = (
             db.query(UserMedication)
             .filter(UserMedication.user_id == user_id, UserMedication.medicine_id == medicine_id)
             .first()
         )
         existing_at = _to_naive_utc(track.created_at) if track and track.created_at else None
-        if existing_at and existing_at >= delivered_at:
+        if existing_at and existing_at >= delivered_at and track and calculate_days_left(track) > 0:
             continue
         pack_count = max(int(item.strips_count or item.quantity or 1), 1)
         units = max(pack_count * _extract_units_per_pack(med.package if med else None), pack_count)
+        is_refill_order = (order.order_uid or "").upper().startswith("RFL-")
+        if is_refill_order:
+            # Refill orders should never leave user with near-zero stock due to package metadata gaps.
+            units = max(units, 10)
         freq = _estimate_frequency_per_day(item.dosage_instruction)
         if track:
-            track.quantity_units = max(int(track.quantity_units or 0), units)
+            created_at = existing_at or delivered_at
+            elapsed_days = max((delivered_at - created_at).days, 0)
+            freq_now = max(int(track.frequency_per_day or 1), 1)
+            remaining_before_delivery = max(int(track.quantity_units or 0) - (elapsed_days * freq_now), 0)
+            track.quantity_units = max(remaining_before_delivery + units, units)
             track.created_at = delivered_at
             if (item.dosage_instruction or "").strip():
                 track.dosage_instruction = item.dosage_instruction
@@ -163,9 +172,7 @@ def get_home_summary(
     db: Session = Depends(get_db),
 ):
     _reconcile_tracking_from_delivered_orders(db, current_user.id)
-    # Keep home summary lightweight; heavy prediction/notification actions run through
-    # dedicated endpoints and scheduled jobs.
-    trigger_daily_refill_notifications_for_user(db, current_user)
+    # Keep home summary lightweight. Alerts are handled by dedicated jobs/endpoints.
     meds = (
         db.query(UserMedication, Medicine)
         .outerjoin(Medicine, Medicine.id == UserMedication.medicine_id)

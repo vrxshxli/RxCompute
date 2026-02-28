@@ -71,9 +71,17 @@ export default function AdminOrders() {
   filtered.forEach(o => { if(!groups[o.status]) groups[o.status]=[]; groups[o.status].push(o); });
   const statusOrder = ["pending","confirmed","verified","picking","packed","dispatched","delivered","cancelled"];
   const statusColor = {pending:T.yellow,confirmed:T.blue,verified:T.green,picking:T.yellow,packed:T.blue,dispatched:T.green,delivered:T.green,cancelled:T.red};
-  const getStatusOptions = (current) => {
+  const getStatusOptions = (order) => {
+    const current = order?.status;
+    const isRefill = String(order?.order_id || "").toUpperCase().startsWith("RFL-");
     if (user?.role !== "admin") return [current];
-    if (current === "pending") return ["pending"];
+    if (current === "pending") {
+      if (isRefill) {
+        // Refill orders can move directly through logistics from pending.
+        return ["pending", "verified", "picking", "packed", "dispatched", "delivered", "cancelled"];
+      }
+      return ["pending"];
+    }
     if (current === "verified") return ["verified", "picking", "cancelled"];
     if (current === "picking") return ["picking", "packed", "cancelled"];
     if (current === "packed") return ["packed", "dispatched", "cancelled"];
@@ -139,10 +147,10 @@ export default function AdminOrders() {
                   <select
                     value={o.status}
                     onChange={(e) => updateStatus(o.id, e.target.value)}
-                    disabled={savingId === o.id || getStatusOptions(o.status).length === 1}
+                    disabled={savingId === o.id || getStatusOptions(o).length === 1}
                     style={{ fontSize:11, padding:"4px 6px", border:`1px solid ${T.gray200}`, borderRadius:6 }}
                   >
-                    {getStatusOptions(o.status).map((s) => (
+                    {getStatusOptions(o).map((s) => (
                       <option key={s} value={s}>{s.replace(/_/g," ")}</option>
                     ))}
                   </select>
