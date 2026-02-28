@@ -28,6 +28,9 @@ class ApiConfig {
   // Notifications
   static const String notifications = '/notifications';
 
+  // Prediction agent
+  static const String predictions = '/predictions';
+
   // Dynamic home + meds tracker
   static const String homeSummary = '/home/summary';
   static const String userMedications = '/user-medications';

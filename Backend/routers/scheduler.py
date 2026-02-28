@@ -12,6 +12,8 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from dependencies import get_current_user
+from models.notification import NotificationType
+from services.notifications import create_notification
 from models.user import User
 from models.pharmacy_store import PharmacyStore
 from schedular_agent.schedular_agent import route_order_to_pharmacy
@@ -24,10 +26,52 @@ class RouteReq(BaseModel):
     order_items: list[dict] = []
 
 
+def _publish_scheduler_trace(
+    db: Session,
+    actor: User,
+    result: dict,
+    phase: str,
+    order_items: list[dict] | None = None,
+) -> None:
+    admins = db.query(User).filter(User.role == "admin").all()
+    metadata = {
+        "agent_name": "scheduler_agent",
+        "phase": phase,
+        "assigned_pharmacy": result.get("assigned_pharmacy"),
+        "routing_reason": result.get("routing_reason"),
+        "fallback_used": bool(result.get("fallback_used")),
+        "winning_score": result.get("winning_score"),
+        "order_item_count": result.get("order_item_count"),
+        "ranking": result.get("ranking", []),
+        "disqualification_log": result.get("disqualification_log", []),
+        "evaluations": result.get("evaluations", []),
+        "triggered_by_user_id": actor.id,
+        "triggered_by_role": actor.role,
+        "target_user_id": actor.id,
+        "input_items": order_items or [],
+    }
+    title = "Scheduler Agent Trace"
+    body = result.get("routing_reason") or f"Scheduler selected {result.get('assigned_pharmacy') or '-'}"
+    for admin in admins:
+        create_notification(
+            db,
+            admin.id,
+            NotificationType.safety,
+            title,
+            body,
+            has_action=True,
+            dedupe_window_minutes=0,
+            metadata=metadata,
+        )
+    db.commit()
+
+
 @router.post("/route")
 def route_order(data: RouteReq, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Route order to optimal pharmacy. Full Langfuse trace."""
-    return route_order_to_pharmacy(user_id=user.id, order_items=data.order_items)
+    result = route_order_to_pharmacy(user_id=user.id, order_items=data.order_items)
+    _publish_scheduler_trace(db, user, result, "scheduler_route_api", data.order_items)
+    return result
 
 
 @router.get("/grid-status")
@@ -57,4 +101,5 @@ def simulate(user: User = Depends(get_current_user), db: Session = Depends(get_d
     if user.role not in STAFF:
         raise HTTPException(403, "Staff only")
     result = route_order_to_pharmacy(user_id=user.id, order_items=[], dry_run=True)
+    _publish_scheduler_trace(db, user, result, "scheduler_simulate_api", [])
     return {"simulation": True, "note": "Dry run only. No load mutated.", **result}

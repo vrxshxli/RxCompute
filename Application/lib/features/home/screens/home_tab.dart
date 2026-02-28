@@ -5,10 +5,12 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/rx_theme_ext.dart';
 import '../../../core/widgets/shared_widgets.dart';
 import '../../../config/routes.dart';
+import '../../../data/repositories/prediction_repository.dart';
 import '../bloc/home_bloc.dart';
 
 class HomeTab extends StatelessWidget {
   const HomeTab({super.key});
+  static final PredictionRepository _predictionRepository = PredictionRepository();
 
   @override
   Widget build(BuildContext context) {
@@ -78,10 +80,7 @@ class HomeTab extends StatelessWidget {
                   onTrailTap: () {
                     final target = al?.medicine ?? (state.activeMeds.isNotEmpty ? state.activeMeds.first.name : null);
                     if (target == null) return;
-                    context.read<HomeBloc>().add(ReorderRefillEvent(target, medicineId: al?.medicineId));
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Reorder placed'), backgroundColor: C.ok),
-                    );
+                    _showRefillConfirmDialog(context, medicineName: target, medicineId: al?.medicineId);
                   },
                 ),
                 const SizedBox(height: 14),
@@ -310,6 +309,87 @@ class HomeTab extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+
+  Future<void> _showRefillConfirmDialog(
+    BuildContext context, {
+    required String medicineName,
+    int? medicineId,
+  }) async {
+    final qtyCtrl = TextEditingController(text: '1');
+    bool confirmed = false;
+    await showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setStateDialog) {
+            return AlertDialog(
+              title: const Text('Confirm Refill'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Medicine: $medicineName'),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: qtyCtrl,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: 'Quantity (units/strips)'),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Checkbox(
+                        value: confirmed,
+                        onChanged: (v) => setStateDialog(() => confirmed = v == true),
+                      ),
+                      const Expanded(
+                        child: Text('I confirm refill order creation. Payment will remain pending.'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+                ElevatedButton(
+                  onPressed: !confirmed
+                      ? null
+                      : () async {
+                          final qty = int.tryParse(qtyCtrl.text.trim()) ?? 1;
+                          try {
+                            final res = await _predictionRepository.confirmRefill(
+                              medicineId: medicineId,
+                              medicineName: medicineId == null ? medicineName : null,
+                              quantityUnits: qty < 1 ? 1 : qty,
+                              confirmationSource: 'popup',
+                            );
+                            if (context.mounted) {
+                              Navigator.pop(ctx);
+                              context.read<HomeBloc>().add(LoadHomeDataEvent());
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('Refill order created: ${res['order_uid'] ?? ''} (payment pending)'),
+                                  backgroundColor: C.ok,
+                                ),
+                              );
+                            }
+                          } catch (_) {
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Refill confirmation failed'), backgroundColor: C.err),
+                              );
+                            }
+                          }
+                        },
+                  child: const Text('Confirm'),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 

@@ -91,6 +91,11 @@ export default function AdminAgentTraces() {
             Assigned: {l?.metadata?.assigned_pharmacy || '-'} · Score: {l?.metadata?.winning_score ?? '-'} · Fallback: {l?.metadata?.fallback_used ? 'Yes' : 'No'}
           </div>
         ) : null}
+        {l?.metadata?.agent_name === 'prediction_agent' ? (
+          <div style={{ fontSize:11, color:T.gray700, lineHeight:1.5 }}>
+            Target: {l?.metadata?.target_user_id ? `#${l.metadata.target_user_id}` : '-'} · Candidates: {l?.metadata?.candidate_count ?? l?.metadata?.prediction_count ?? '-'} · Alerts: {l?.metadata?.actions?.alerts_created ?? l?.metadata?.alerts_created ?? '-'}
+          </div>
+        ) : null}
         {Array.isArray(l?.metadata?.ocr_details) && l.metadata.ocr_details.length ? (
           <div style={{ border:`1px solid ${T.gray200}`, borderRadius:8, padding:10, background:T.gray50 }}>
             {l.metadata.ocr_details.map((d, idx) => (

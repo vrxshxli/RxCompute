@@ -12,6 +12,7 @@ from routers.pharmacy_stores import router as pharmacy_stores_router
 from routers.warehouse import router as warehouse_router
 from routers.safety import router as safety_router
 from routers.scheduler import router as scheduler_router
+from routers.predictions import router as predictions_router
 
 __all__ = [
     "auth_router",
@@ -28,4 +29,5 @@ __all__ = [
     "warehouse_router",
     "safety_router",
     "scheduler_router",
+    "predictions_router",
 ]

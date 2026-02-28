@@ -65,13 +65,41 @@ export default function VoiceSafetyAssistant({ nav = [], onSelectPage, notificat
     }
   };
 
+  const runRefillConfirmByVoice = async (medicineText, qty) => {
+    if (!token || !apiBase) {
+      speak("Please login first.");
+      return;
+    }
+    try {
+      const res = await fetch(`${apiBase}/predictions/refill/confirm`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          medicine_name: medicineText,
+          quantity_units: qty || 1,
+          confirmation_checked: true,
+          confirmation_source: "voice",
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        const msg = data?.detail?.message || data?.detail || "Refill confirmation failed.";
+        speak(String(msg));
+        return;
+      }
+      speak(`Refill order created. ${data?.order_uid || ""}. Payment is pending.`);
+    } catch (_) {
+      speak("Network error while confirming refill.");
+    }
+  };
+
   const handleCommand = async (raw) => {
     const text = clean(raw);
     setLastHeard(raw);
     if (!text) return;
 
     if (text.includes("help")) {
-      speak("You can say open orders, open safety events, mark all notifications, read latest safety alert, or check safety for paracetamol quantity two.");
+      speak("You can say open orders, open safety events, mark all notifications, read latest safety alert, check safety for paracetamol quantity two, or confirm refill omega three quantity two.");
       return;
     }
 
@@ -96,6 +124,18 @@ export default function VoiceSafetyAssistant({ nav = [], onSelectPage, notificat
       const medicineText = (safetyCmd[1] || "").trim();
       const qty = Number(safetyCmd[2] || safetyCmd[3] || 1);
       await runSafetyByVoice(medicineText, qty);
+      return;
+    }
+
+    const refillCmd = text.match(/(?:confirm refill|refill confirm|reorder refill) (.+?)(?: quantity (\d+)| qty (\d+)|$)/i);
+    if (refillCmd) {
+      const medicineText = (refillCmd[1] || "").trim();
+      const qty = Number(refillCmd[2] || refillCmd[3] || 1);
+      if (!medicineText) {
+        speak("Please tell medicine name for refill confirmation.");
+        return;
+      }
+      await runRefillConfirmByVoice(medicineText, qty);
       return;
     }
 

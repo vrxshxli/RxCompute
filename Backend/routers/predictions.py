@@ -5,22 +5,100 @@ Prediction Agent API — Refill Intelligence
   GET  /predictions/me             → My medications with predictions
   GET  /predictions/demand         → Demand forecast for next N days (admin)
   POST /predictions/patient/{id}   → Predict for specific patient (admin)
+  GET  /predictions/refill/candidates → Refill candidates requiring confirmation
+  POST /predictions/refill/confirm    → Confirm refill and auto-create order (payment pending)
 """
 
+import uuid
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from database import get_db
 from dependencies import get_current_user
+from models.medicine import Medicine
+from models.notification import NotificationType
+from models.order import Order, OrderItem, OrderStatus
 from models.user import User
+from saftery_policies_agents.graph import process_with_safety
+from schedular_agent.schedular_agent import route_order_to_pharmacy
 from prediction_agent.prediction_agent import (
     run_prediction_scan,
     run_prediction_for_user,
     run_demand_forecast,
 )
+from services.notifications import create_notification, run_in_background, send_push_to_token
 
 router = APIRouter(prefix="/predictions", tags=["Prediction Agent"])
 STAFF = {"admin", "pharmacy_store", "warehouse"}
+
+
+def _generate_refill_order_uid() -> str:
+    now = datetime.utcnow().strftime("%Y%m%d")
+    short = uuid.uuid4().hex[:6].upper()
+    return f"RFL-{now}-{short}"
+
+
+class RefillConfirmRequest(BaseModel):
+    medication_id: int | None = None
+    medicine_id: int | None = None
+    medicine_name: str | None = None
+    quantity_units: int = Field(default=1, ge=1, le=365)
+    confirmation_checked: bool = False
+    confirmation_source: str = "popup"
+    prescription_file: str | None = None
+    dosage_instruction: str | None = None
+    target_user_id: int | None = None
+
+
+def _publish_prediction_order_trace(
+    db: Session,
+    actor: User,
+    target_user_id: int,
+    phase: str,
+    payload: dict,
+    body: str,
+) -> None:
+    admins = db.query(User).filter(User.role == "admin").all()
+    metadata = {
+        "agent_name": "prediction_agent",
+        "phase": phase,
+        "target_user_id": target_user_id,
+        "triggered_by_user_id": actor.id,
+        "triggered_by_role": actor.role,
+        **(payload or {}),
+    }
+    for admin in admins:
+        create_notification(
+            db,
+            admin.id,
+            NotificationType.safety,
+            "Prediction Agent Trace",
+            body,
+            has_action=True,
+            dedupe_window_minutes=0,
+            metadata=metadata,
+        )
+    db.commit()
+
+
+def _select_prediction(preds: list[dict], req: RefillConfirmRequest) -> dict | None:
+    if req.medication_id is not None:
+        for p in preds:
+            if p.get("medication_id") == req.medication_id:
+                return p
+    if req.medicine_id is not None:
+        for p in preds:
+            if p.get("medicine_id") == req.medicine_id:
+                return p
+    if req.medicine_name:
+        q = req.medicine_name.strip().lower()
+        for p in preds:
+            if q and q in str(p.get("medicine_name", "")).lower():
+                return p
+    return preds[0] if preds else None
 
 
 @router.post("/scan")
@@ -66,6 +144,172 @@ def my_predictions(
     Used by: Flutter home tab, medicine brain screen.
     """
     return run_prediction_for_user(current_user.id)
+
+
+@router.get("/refill/candidates")
+def refill_candidates(
+    target_user_id: int | None = Query(default=None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    resolved_user_id = current_user.id
+    if target_user_id is not None:
+        if current_user.role not in STAFF:
+            raise HTTPException(status_code=403, detail="Staff only can query another user")
+        resolved_user_id = target_user_id
+    result = run_prediction_for_user(resolved_user_id)
+    preds = [p for p in (result.get("predictions") or []) if int(p.get("days_remaining", 9999)) <= 7]
+    for p in preds:
+        p["confirmation_required"] = True
+        p["payment_auto"] = False
+    _publish_prediction_order_trace(
+        db,
+        current_user,
+        resolved_user_id,
+        "prediction_refill_candidates",
+        {
+            "candidate_count": len(preds),
+            "predictions": preds,
+        },
+        f"Refill candidates generated for user #{resolved_user_id}.",
+    )
+    return {
+        "user_id": resolved_user_id,
+        "candidates": preds,
+        "confirmation_modes": ["popup", "voice"],
+    }
+
+
+@router.post("/refill/confirm")
+def confirm_refill_and_create_order(
+    req: RefillConfirmRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if not req.confirmation_checked:
+        raise HTTPException(status_code=400, detail="Confirmation checkbox/voice confirmation is required")
+    target_user_id = current_user.id
+    if req.target_user_id is not None:
+        if current_user.role not in STAFF:
+            raise HTTPException(status_code=403, detail="Staff only can confirm for another user")
+        target_user_id = req.target_user_id
+
+    target_user = db.query(User).filter(User.id == target_user_id).first()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="Target user not found")
+
+    pred_result = run_prediction_for_user(target_user_id)
+    pred_rows = pred_result.get("predictions") or []
+    if not pred_rows:
+        raise HTTPException(status_code=400, detail="No refill prediction available for this user")
+    picked = _select_prediction(pred_rows, req)
+    if not picked:
+        raise HTTPException(status_code=400, detail="No matching prediction found")
+
+    medicine_id = req.medicine_id or picked.get("medicine_id")
+    if not medicine_id:
+        raise HTTPException(status_code=400, detail="Selected medication is custom-only. Choose medicine with valid medicine_id.")
+    med = db.query(Medicine).filter(Medicine.id == medicine_id).first()
+    if not med:
+        raise HTTPException(status_code=404, detail="Medicine not found")
+
+    qty = max(1, int(req.quantity_units or 1))
+    dosage = (req.dosage_instruction or picked.get("dosage") or "As prescribed").strip()
+    safety_payload = [{
+        "medicine_id": med.id,
+        "name": med.name,
+        "quantity": qty,
+        "dosage_instruction": dosage,
+        "strips_count": qty,
+        "prescription_file": req.prescription_file,
+    }]
+    safety = process_with_safety(
+        user_id=target_user_id,
+        matched_medicines=safety_payload,
+        user_message=f"Prediction refill confirmation via {req.confirmation_source}",
+    )
+    if safety.get("has_blocks"):
+        reason = (safety.get("safety_summary") or "Refill blocked by safety checks").strip()
+        _publish_prediction_order_trace(
+            db,
+            current_user,
+            target_user_id,
+            "prediction_refill_confirm_blocked",
+            {
+                "medicine_id": med.id,
+                "medicine_name": med.name,
+                "quantity_units": qty,
+                "confirmation_source": req.confirmation_source,
+                "safety_summary": reason,
+                "safety_results": safety.get("safety_results", []),
+            },
+            f"Prediction refill blocked for {med.name}: {reason}",
+        )
+        raise HTTPException(status_code=400, detail={"message": reason, "safety_results": safety.get("safety_results", [])})
+
+    scheduler_result = route_order_to_pharmacy(user_id=target_user_id, order_items=safety_payload, dry_run=False)
+    assigned_pharmacy = scheduler_result.get("assigned_pharmacy")
+    order = Order(
+        order_uid=_generate_refill_order_uid(),
+        user_id=target_user_id,
+        status=OrderStatus.pending,
+        total=float(med.price) * qty,
+        pharmacy=assigned_pharmacy,
+        payment_method=None,  # Payment is intentionally not auto-completed.
+        delivery_address=target_user.location_text,
+        delivery_lat=target_user.location_lat,
+        delivery_lng=target_user.location_lng,
+    )
+    db.add(order)
+    db.flush()
+    db.add(
+        OrderItem(
+            order_id=order.id,
+            medicine_id=med.id,
+            name=med.name,
+            quantity=qty,
+            price=float(med.price),
+            dosage_instruction=dosage,
+            strips_count=qty,
+            rx_required=bool(med.rx_required),
+            prescription_file=req.prescription_file,
+        )
+    )
+    db.commit()
+    db.refresh(order)
+
+    title = "Refill Order Created (Payment Pending)"
+    body = f"{order.order_uid} for {med.name} created after {req.confirmation_source} confirmation. Please complete payment to proceed."
+    create_notification(db, target_user_id, NotificationType.refill, title, body, has_action=True, dedupe_window_minutes=0)
+    db.commit()
+    run_in_background(send_push_to_token, target_user.push_token, title, body, target_user.id)
+
+    _publish_prediction_order_trace(
+        db,
+        current_user,
+        target_user_id,
+        "prediction_refill_confirm_success",
+        {
+            "order_id": order.id,
+            "order_uid": order.order_uid,
+            "medicine_id": med.id,
+            "medicine_name": med.name,
+            "quantity_units": qty,
+            "confirmation_source": req.confirmation_source,
+            "payment_auto": False,
+            "scheduler_result": scheduler_result,
+        },
+        f"Prediction refill order created: {order.order_uid}",
+    )
+    return {
+        "message": "Refill order created successfully. Payment is pending.",
+        "order_id": order.id,
+        "order_uid": order.order_uid,
+        "status": order.status.value,
+        "payment_auto": False,
+        "payment_required": True,
+        "scheduler_result": scheduler_result,
+    }
 
 
 @router.get("/demand")

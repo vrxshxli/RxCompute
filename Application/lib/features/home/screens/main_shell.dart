@@ -17,6 +17,7 @@ import '../../../data/repositories/medicine_repository.dart';
 import '../../../data/repositories/notification_repository.dart';
 import '../../../data/repositories/order_repository.dart';
 import '../../../data/repositories/user_repository.dart';
+import '../../../data/repositories/prediction_repository.dart';
 import '../bloc/home_bloc.dart';
 import 'home_tab.dart';
 import '../../chat/screens/chat_screen.dart';
@@ -42,6 +43,7 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
   final MedicineRepository _medicineRepository = MedicineRepository();
   final NotificationRepository _notificationRepository = NotificationRepository();
   final OrderRepository _orderRepository = OrderRepository();
+  final PredictionRepository _predictionRepository = PredictionRepository();
   final ApiProvider _apiProvider = ApiProvider();
   bool _speechReady = false;
   bool _isListening = false;
@@ -292,8 +294,8 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
 
     if (says(['help', 'madad', 'सहायता'])) {
       await _speak(_voiceLanguage == 'hi-IN'
-          ? 'आप बोल सकते हैं: ओपन होम, ओपन चैट, ओपन मेड्स, ओपन प्रोफाइल, सेफ्टी चेक फॉर पैरासिटामोल क्वांटिटी 2, या रीड लेटेस्ट सेफ्टी अलर्ट।'
-          : 'You can say: open home, open chat, open meds, open profile, check safety for paracetamol quantity 2, or read latest safety alert.');
+          ? 'आप बोल सकते हैं: ओपन होम, ओपन चैट, ओपन मेड्स, ओपन प्रोफाइल, सेफ्टी चेक फॉर पैरासिटामोल क्वांटिटी 2, रीफिल कन्फर्म ओमेगा 3 क्वांटिटी 2, या रीड लेटेस्ट सेफ्टी अलर्ट।'
+          : 'You can say: open home, open chat, open meds, open profile, check safety for paracetamol quantity 2, confirm refill omega 3 quantity 2, or read latest safety alert.');
       return;
     }
 
@@ -366,6 +368,36 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
         await _speak(summary.isNotEmpty ? summary : (_voiceLanguage == 'hi-IN' ? 'सेफ्टी चेक पूरा हुआ।' : 'Safety check completed.'));
       } catch (_) {
         await _speak(_voiceLanguage == 'hi-IN' ? 'सेफ्टी चेक में समस्या आई।' : 'Safety check failed.');
+      }
+      return;
+    }
+
+    if (says(['confirm refill', 'refill confirm', 'reorder refill', 'रीफिल कन्फर्म'])) {
+      final qtyMatch = RegExp(r'(quantity|qty)\s+(\d+)').firstMatch(txt);
+      final qty = qtyMatch != null ? int.tryParse(qtyMatch.group(2) ?? '1') ?? 1 : 1;
+      String medQuery = txt
+          .replaceAll(RegExp(r'confirm refill|refill confirm|reorder refill|quantity\s+\d+|qty\s+\d+'), ' ')
+          .replaceAll(RegExp(r'रीफिल कन्फर्म|रीफिल|कन्फर्म'), ' ')
+          .replaceAll(RegExp(r'\s+'), ' ')
+          .trim();
+      if (medQuery.isEmpty) {
+        await _speak(_voiceLanguage == 'hi-IN' ? 'कृपया मेडिसिन का नाम बोलें।' : 'Please tell the medicine name.');
+        return;
+      }
+      try {
+        final res = await _predictionRepository.confirmRefill(
+          medicineName: medQuery,
+          quantityUnits: qty,
+          confirmationSource: 'voice',
+        );
+        final uid = (res['order_uid'] ?? '').toString();
+        await _speak(
+          _voiceLanguage == 'hi-IN'
+              ? 'रीफिल ऑर्डर बन गया है ${uid.isNotEmpty ? uid : ''}. पेमेंट पेंडिंग है।'
+              : 'Refill order created ${uid.isNotEmpty ? uid : ''}. Payment is pending.',
+        );
+      } catch (_) {
+        await _speak(_voiceLanguage == 'hi-IN' ? 'रीफिल कन्फर्म नहीं हो पाया।' : 'Refill confirmation failed.');
       }
       return;
     }

@@ -8,6 +8,8 @@ export default function AdminRefillAlerts() {
   const { token, apiBase } = useAuth();
   const [search, setSearch] = useState("");
   const [medicines, setMedicines] = useState([]);
+  const [confirmTick, setConfirmTick] = useState({});
+  const [qtyMap, setQtyMap] = useState({});
 
   const load = async () => {
     if (!token) return;
@@ -58,6 +60,35 @@ export default function AdminRefillAlerts() {
 
   const riskColor = r => r==="overdue"?T.red:r==="high"?T.orange:r==="medium"?T.yellow:T.green;
 
+  const confirmRefill = async (row) => {
+    if (!confirmTick[row.id]) {
+      alert("Please tick confirmation checkbox first.");
+      return;
+    }
+    const qty = Number(qtyMap[row.id] || row.need_to_order || 1);
+    try {
+      const res = await fetch(`${apiBase}/predictions/refill/confirm`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          medicine_id: row.id,
+          quantity_units: qty > 0 ? qty : 1,
+          confirmation_checked: true,
+          confirmation_source: "popup",
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data?.detail?.message || data?.detail || "Refill confirmation failed");
+        return;
+      }
+      alert(`Refill order created: ${data.order_uid}. Payment pending.`);
+      setConfirmTick((p) => ({ ...p, [row.id]: false }));
+    } catch (_) {
+      alert("Network error while creating refill order.");
+    }
+  };
+
   return (<div>
     <PageHeader title="Proactive Refill Alerts" badge={String(refillRows.length)} actions={<Btn variant="primary" size="sm" onClick={load}><RefreshCw size={14}/>Refresh</Btn>} />
     <div style={{display:"flex",gap:16,marginBottom:24,flexWrap:"wrap"}}>
@@ -79,14 +110,33 @@ export default function AdminRefillAlerts() {
           </div>
           <div style={{ fontSize:14, fontWeight:600, color:T.gray900, marginBottom:4 }}>{a.medicine.split(" ").slice(0,4).join(" ")}</div>
           <div style={{ fontSize:12, color:T.gray500, marginBottom:8 }}>{a.dosage} · Need: {a.need_to_order} units</div>
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
             <div>
               <span style={{ fontSize:22, fontWeight:800, color:riskColor(a.risk_level) }}>{a.days_remaining}d</span>
               <span style={{ fontSize:11, color:T.gray400, marginLeft:4 }}>{a.days_remaining<0?"overdue":"remaining"} · stock {a.stock}</span>
             </div>
             <div style={{ display:"flex", alignItems:"center", gap:6 }}>
               <StatusPill status={a.status} size="xs" />
-              {a.status==="pending" && <Btn variant="ghost" size="sm"><Send size={12}/></Btn>}
+              {a.status==="pending" && (
+                <div style={{display:"flex", alignItems:"center", gap:6}}>
+                  <input
+                    type="number"
+                    min={1}
+                    value={qtyMap[a.id] ?? a.need_to_order}
+                    onChange={(e) => setQtyMap((p) => ({ ...p, [a.id]: e.target.value }))}
+                    style={{width:70,padding:"6px 8px",border:`1px solid ${T.gray300}`,borderRadius:6,fontSize:11}}
+                  />
+                  <label style={{fontSize:11,color:T.gray600,display:"flex",alignItems:"center",gap:4}}>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(confirmTick[a.id])}
+                      onChange={(e) => setConfirmTick((p) => ({ ...p, [a.id]: e.target.checked }))}
+                    />
+                    Confirm
+                  </label>
+                  <Btn variant="ghost" size="sm" onClick={() => confirmRefill(a)}><Send size={12}/></Btn>
+                </div>
+              )}
             </div>
           </div>
         </div>
