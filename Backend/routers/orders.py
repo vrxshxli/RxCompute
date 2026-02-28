@@ -1,4 +1,5 @@
 import uuid
+import re
 from datetime import datetime
 from math import atan2, cos, radians, sin, sqrt
 
@@ -198,24 +199,78 @@ def _publish_scheduler_alert(
 
 
 def _restock_user_medications_on_refill_delivery(db: Session, order: Order) -> None:
-    if not (order.order_uid or "").upper().startswith("RFL-"):
-        return
+    def _extract_units_per_pack(package: str | None) -> int:
+        txt = (package or "").lower().strip()
+        if not txt:
+            return 1
+        # Most tablet/capsule packs are stored like "20 st", "60 st", "120 capsules".
+        m = re.search(r"(\d+)\s*(st|tabs?|tablets?|caps?(?:ules?)?)\b", txt)
+        if m:
+            return max(int(m.group(1)), 1)
+        # Fallback: first integer token in package text.
+        n = re.search(r"(\d+)", txt)
+        return max(int(n.group(1)), 1) if n else 1
+
+    def _estimate_frequency_per_day(dosage_instruction: str | None) -> int | None:
+        raw = (dosage_instruction or "").strip().lower()
+        if not raw:
+            return None
+        tri = re.search(r"\b(\d+)\s*-\s*(\d+)\s*-\s*(\d+)\b", raw)
+        if tri:
+            return max(int(tri.group(1)) + int(tri.group(2)) + int(tri.group(3)), 1)
+        xday = re.search(r"\b(\d+)\s*(x|times?)\s*(/|per)?\s*day\b", raw)
+        if xday:
+            return max(int(xday.group(1)), 1)
+        if "once daily" in raw or re.search(r"\bod\b", raw):
+            return 1
+        if "twice" in raw or re.search(r"\bbd\b", raw):
+            return 2
+        if "thrice" in raw or re.search(r"\btds\b", raw):
+            return 3
+        return None
+
+    def _remaining_units_now(row: UserMedication, now_utc: datetime) -> int:
+        created = row.created_at or now_utc
+        if created.tzinfo is not None:
+            # Align to naive UTC arithmetic for consistency with existing order timestamps.
+            created = created.replace(tzinfo=None)
+        elapsed_days = max((now_utc - created).days, 0)
+        freq = max(int(row.frequency_per_day or 1), 1)
+        consumed = elapsed_days * freq
+        return max(int(row.quantity_units or 0) - consumed, 0)
+
+    def _dispensed_units(it: OrderItem, med: Medicine | None) -> int:
+        pack_count = int(it.strips_count or it.quantity or 1)
+        pack_count = max(pack_count, 1)
+        units_per_pack = _extract_units_per_pack(med.package if med else None)
+        return max(pack_count * units_per_pack, pack_count)
+
     now = datetime.utcnow()
+    med_ids = [int(it.medicine_id) for it in order.items if it.medicine_id]
+    med_rows = db.query(Medicine).filter(Medicine.id.in_(med_ids)).all() if med_ids else []
+    med_map = {m.id: m for m in med_rows}
     for it in order.items:
         if not it.medicine_id:
             continue
+        med = med_map.get(it.medicine_id)
         row = (
             db.query(UserMedication)
             .filter(UserMedication.user_id == order.user_id, UserMedication.medicine_id == it.medicine_id)
             .first()
         )
-        refill_units = max(10, int(it.strips_count or it.quantity or 1))
+        dispensed_units = _dispensed_units(it, med)
+        freq_from_dosage = _estimate_frequency_per_day(it.dosage_instruction)
         if row:
-            row.quantity_units = refill_units
+            remaining_before_delivery = _remaining_units_now(row, now)
+            row.quantity_units = max(remaining_before_delivery + dispensed_units, 1)
             row.created_at = now
-            if not row.dosage_instruction:
-                row.dosage_instruction = it.dosage_instruction or "As prescribed"
-            if not row.frequency_per_day or row.frequency_per_day <= 0:
+            if (it.dosage_instruction or "").strip():
+                row.dosage_instruction = it.dosage_instruction
+            elif not row.dosage_instruction:
+                row.dosage_instruction = "As prescribed"
+            if freq_from_dosage:
+                row.frequency_per_day = freq_from_dosage
+            elif not row.frequency_per_day or row.frequency_per_day <= 0:
                 row.frequency_per_day = 1
         else:
             db.add(
@@ -224,8 +279,8 @@ def _restock_user_medications_on_refill_delivery(db: Session, order: Order) -> N
                     medicine_id=it.medicine_id,
                     custom_name=it.name,
                     dosage_instruction=it.dosage_instruction or "As prescribed",
-                    frequency_per_day=1,
-                    quantity_units=refill_units,
+                    frequency_per_day=freq_from_dosage or 1,
+                    quantity_units=max(dispensed_units, 1),
                 )
             )
 
