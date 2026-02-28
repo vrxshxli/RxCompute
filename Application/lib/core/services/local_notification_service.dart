@@ -29,7 +29,6 @@ class LocalNotificationService {
       importance: Importance.max,
       priority: Priority.high,
       playSound: true,
-      sound: RawResourceAndroidNotificationSound('rx_tune'),
     );
     const ios = DarwinNotificationDetails(presentAlert: true, presentBadge: true, presentSound: true);
     await _plugin.show(id, title, body, const NotificationDetails(android: android, iOS: ios));

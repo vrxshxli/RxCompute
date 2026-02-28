@@ -64,6 +64,7 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
   DateTime? _lastVoiceUnavailablePromptAt;
   String _lastSpokenText = '';
   DateTime? _lastSpokenAt;
+  bool _tuneUnavailable = false;
 
   @override
   void initState() {
@@ -334,6 +335,15 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
     );
   }
 
+  Future<void> _playTune() async {
+    if (_tuneUnavailable) return;
+    try {
+      await _audioPlayer.play(AssetSource('lib/assets/sounds/rx_tune.wav'));
+    } catch (_) {
+      _tuneUnavailable = true;
+    }
+  }
+
   void _announceMessage({
     required String title,
     required String body,
@@ -353,10 +363,10 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
     }
     _speakDedupe[key] = now;
 
-    _audioPlayer.play(AssetSource('sounds/rx_tune.wav'));
+    _playTune();
     if (isSafety || highPriority) {
       Future.delayed(const Duration(milliseconds: 900), () {
-        _audioPlayer.play(AssetSource('sounds/rx_tune.wav'));
+        _playTune();
       });
     }
     if (isSafety && isExceptionAgent) {
@@ -600,9 +610,9 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
         final summary = (data['safety_summary'] ?? '').toString();
         final blocked = data['blocked'] == true;
         if (blocked) {
-          _audioPlayer.play(AssetSource('sounds/rx_tune.wav'));
+          _playTune();
           Future.delayed(const Duration(milliseconds: 900), () {
-            _audioPlayer.play(AssetSource('sounds/rx_tune.wav'));
+            _playTune();
           });
         }
         await _speak(summary.isNotEmpty ? summary : (_voiceLanguage == 'hi-IN' ? 'सेफ्टी चेक पूरा हुआ।' : 'Safety check completed.'));

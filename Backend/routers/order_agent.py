@@ -171,6 +171,21 @@ def execute_full_pipeline(
             body="Order agent execution blocked by safety checks.",
             payload={"source": source, "safety_summary": safety.get("safety_summary", "")},
         )
+        create_notification(
+            db,
+            current_user.id,
+            NotificationType.safety,
+            "Safety Agent Rejected Order",
+            safety.get("safety_summary", "") or "Order blocked by safety checks.",
+            has_action=True,
+            dedupe_window_minutes=1,
+            metadata={
+                "agent_name": "safety_agent",
+                "phase": "order_agent_execute_blocked",
+                "safety_results": safety.get("safety_results", []),
+            },
+        )
+        db.commit()
         return {
             "success": False,
             "stage": "safety_agent",
@@ -201,6 +216,21 @@ def execute_full_pipeline(
                 body="Order agent execution held by exception agent review requirements.",
                 payload={"source": source, "exception_result": exception_result},
             )
+            create_notification(
+                db,
+                current_user.id,
+                NotificationType.safety,
+                "Order Requires Manual Review",
+                safety.get("safety_summary", "") or "Order held by exception agent review requirements.",
+                has_action=True,
+                dedupe_window_minutes=1,
+                metadata={
+                    "agent_name": "exception_agent",
+                    "phase": "order_agent_execute_held",
+                    "exception_result": exception_result,
+                },
+            )
+            db.commit()
             return {
                 "success": False,
                 "stage": "exception_agent",

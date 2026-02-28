@@ -50,6 +50,7 @@ from urllib import request as urllib_request
 from langfuse.decorators import observe, langfuse_context
 from database import SessionLocal
 from models.medicine import Medicine
+from models.order import Order, OrderItem, OrderStatus
 from saftery_policies_agents.state import AgentState, SafetyCheckResult
 from services.rx_knowledge import is_rx_required_from_knowledge
 
@@ -261,6 +262,42 @@ def _evaluate_rules(
             rule="duplicate_active_medication",
             message=f"{name} still has approximately {days_remaining} day(s) remaining. Reorder is allowed only after current cycle is finished.",
             detail={"days_remaining": days_remaining},
+        )
+    if days_remaining is None:
+        hist_days_remaining = _estimated_days_remaining_from_latest_delivery_history(db, user_id, med.id, med.package)
+        if hist_days_remaining is not None and hist_days_remaining > 0:
+            reasoning = (
+                f"History-based duplicate order blocked for user_id={user_id}, medicine='{name}'. "
+                f"Latest delivered supply indicates about {hist_days_remaining} day(s) remaining."
+            )
+            _langfuse_output({"rule": "duplicate_from_order_history", "status": "BLOCKED", "reasoning": reasoning})
+            return SafetyCheckResult(
+                medicine_id=med.id,
+                medicine_name=name,
+                status="blocked",
+                rule="duplicate_from_order_history",
+                message=f"{name} appears to still be active from your latest delivered order ({hist_days_remaining} day(s) remaining).",
+                detail={"days_remaining": hist_days_remaining},
+            )
+
+    # RULE 0b: Same medicine already has active in-flight order.
+    inflight = _has_active_inflight_order_for_medicine(db, user_id, med.id)
+    if inflight:
+        reasoning = (
+            f"Duplicate in-flight order blocked for user_id={user_id}, medicine='{name}'. "
+            f"Existing active order={inflight.order_uid} status={inflight.status.value if hasattr(inflight.status, 'value') else inflight.status}."
+        )
+        _langfuse_output({"rule": "duplicate_active_order_inflight", "status": "BLOCKED", "reasoning": reasoning})
+        return SafetyCheckResult(
+            medicine_id=med.id,
+            medicine_name=name,
+            status="blocked",
+            rule="duplicate_active_order_inflight",
+            message=f"{name} already has an active order ({inflight.order_uid}). Please wait until it is delivered or cancelled.",
+            detail={
+                "existing_order_uid": inflight.order_uid,
+                "existing_order_status": inflight.status.value if hasattr(inflight.status, "value") else str(inflight.status),
+            },
         )
 
     # ────────────────────────────────────────────────────
@@ -959,6 +996,83 @@ def _active_days_remaining_for_user_medication(db, user_id: int, medicine_id: in
     freq = max(int(row.frequency_per_day or 1), 1)
     qty = max(int(row.quantity_units or 0), 0)
     remaining_units = max(qty - (elapsed_days * freq), 0)
+    if remaining_units <= 0:
+        return 0
+    return int(ceil(remaining_units / freq))
+
+
+def _has_active_inflight_order_for_medicine(db, user_id: int, medicine_id: int) -> Order | None:
+    if not user_id or not medicine_id:
+        return None
+    active_statuses = [
+        OrderStatus.pending,
+        OrderStatus.confirmed,
+        OrderStatus.verified,
+        OrderStatus.picking,
+        OrderStatus.packed,
+        OrderStatus.dispatched,
+    ]
+    return (
+        db.query(Order)
+        .join(OrderItem, OrderItem.order_id == Order.id)
+        .filter(
+            Order.user_id == user_id,
+            OrderItem.medicine_id == medicine_id,
+            Order.status.in_(active_statuses),
+        )
+        .order_by(Order.created_at.desc())
+        .first()
+    )
+
+
+def _estimated_days_remaining_from_latest_delivery_history(
+    db,
+    user_id: int,
+    medicine_id: int,
+    package: str | None,
+) -> int | None:
+    if not user_id or not medicine_id:
+        return None
+    # Use latest delivered order line when tracking row is missing.
+    row = (
+        db.query(Order, OrderItem)
+        .join(OrderItem, OrderItem.order_id == Order.id)
+        .filter(
+            Order.user_id == user_id,
+            OrderItem.medicine_id == medicine_id,
+            Order.status == OrderStatus.delivered,
+        )
+        .order_by(Order.last_status_updated_at.desc(), Order.updated_at.desc(), Order.created_at.desc())
+        .first()
+    )
+    if not row:
+        return None
+    order, item = row
+    delivered_at = order.last_status_updated_at or order.updated_at or order.created_at
+    if not delivered_at:
+        return None
+    delivered_at = delivered_at if delivered_at.tzinfo else delivered_at.replace(tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
+    elapsed_days = max((now - delivered_at).days, 0)
+
+    dosage_txt = (item.dosage_instruction or "").lower()
+    freq = 1
+    tri = re.search(r"\b(\d+)\s*-\s*(\d+)\s*-\s*(\d+)\b", dosage_txt)
+    if tri:
+        freq = max(int(tri.group(1)) + int(tri.group(2)) + int(tri.group(3)), 1)
+    else:
+        xday = re.search(r"\b(\d+)\s*(x|times?)\s*(/|per)?\s*day\b", dosage_txt)
+        if xday:
+            freq = max(int(xday.group(1)), 1)
+        elif "twice" in dosage_txt or "bd" in dosage_txt:
+            freq = 2
+        elif "thrice" in dosage_txt or "tid" in dosage_txt:
+            freq = 3
+
+    units_per_pack = _extract_units_per_strip(package)
+    packs = max(int(item.strips_count or item.quantity or 1), 1)
+    supplied_units = max(packs * units_per_pack, packs)
+    remaining_units = max(supplied_units - (elapsed_days * freq), 0)
     if remaining_units <= 0:
         return 0
     return int(ceil(remaining_units / freq))

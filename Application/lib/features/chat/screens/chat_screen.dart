@@ -118,6 +118,10 @@ class _CS extends State<ChatScreen> {
       return;
     }
 
+    // Ensure bot TTS doesn't occupy the audio session while user starts speaking.
+    try {
+      await _tts.stop();
+    } catch (_) {}
     context.read<ChatBloc>().add(ToggleRecordingEvent());
     await _speech.listen(
       onResult: (result) {
@@ -151,6 +155,7 @@ class _CS extends State<ChatScreen> {
     return BlocConsumer<ChatBloc, ChatState>(
       listener: (context, state) async {
         _scrollEnd();
+        if (state.isRecording) return;
         if (!_spokeVoiceTextHint && state.messages.isNotEmpty) {
           _spokeVoiceTextHint = true;
           await _speakText('You can talk with voice or text in chat. Tap the mic to speak.');

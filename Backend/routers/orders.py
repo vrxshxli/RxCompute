@@ -435,6 +435,15 @@ def list_orders(
             .all()
         )
     if current_user.role in STAFF_ROLES:
+        if current_user.role == "admin":
+            # Admin logistics board starts after pharmacy safety verification.
+            # Pending orders are handled in pharmacy dashboard first.
+            return (
+                db.query(Order)
+                .filter(Order.status != OrderStatus.pending)
+                .order_by(Order.created_at.desc())
+                .all()
+            )
         return db.query(Order).order_by(Order.created_at.desc()).all()
     return (
         db.query(Order)
