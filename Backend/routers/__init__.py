@@ -14,7 +14,7 @@ from routers.safety import router as safety_router
 from routers.scheduler import router as scheduler_router
 from routers.predictions import router as predictions_router
 from routers.order_agent import router as order_agent_router
-from routers.exceptions import router as exceptions_router
+from routers.exception_agent import router as exception_agent_router
 
 __all__ = [
     "auth_router",
@@ -32,4 +32,6 @@ __all__ = [
     "safety_router",
     "scheduler_router",
     "predictions_router",
+    "order_agent_router",
+    "exception_agent_router",
 ]
