@@ -12,7 +12,6 @@ from models.order import Order, OrderItem, OrderStatus
 from models.user_medication import UserMedication
 from schemas.medication import HomeSummaryOut, UserMedicationOut
 from services.refill_reminders import calculate_days_left, trigger_daily_refill_notifications_for_user
-from prediction_agent.prediction_agent import run_prediction_for_user
 
 router = APIRouter(prefix="/home", tags=["Home"])
 
@@ -164,14 +163,8 @@ def get_home_summary(
     db: Session = Depends(get_db),
 ):
     _reconcile_tracking_from_delivered_orders(db, current_user.id)
-    # Trigger refill reminder check when app home is opened.
-    run_prediction_for_user(
-        current_user.id,
-        create_alerts=True,
-        once_per_day=True,
-        trigger_reason="app_open_home_summary",
-        publish_trace=False,
-    )
+    # Keep home summary lightweight; heavy prediction/notification actions run through
+    # dedicated endpoints and scheduled jobs.
     trigger_daily_refill_notifications_for_user(db, current_user)
     meds = (
         db.query(UserMedication, Medicine)

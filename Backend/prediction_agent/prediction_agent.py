@@ -58,7 +58,7 @@ from models.user_medication import UserMedication
 from models.medicine import Medicine
 from models.order import Order, OrderItem, OrderStatus
 from models.notification import Notification, NotificationType
-from services.notifications import create_notification, send_push_if_available, send_refill_email
+from services.notifications import create_notification, run_in_background, send_push_if_available, send_refill_email
 
 
 # ━━━ CONFIG ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -572,7 +572,7 @@ def _create_alert(db: Session, pred: MedicationPrediction) -> bool:
         body = f"{pred.medicine_name} has {pred.days_remaining} day(s) left. Plan your refill soon."
 
     # Create in-app notification (with dedup). Confirmation is required before order create.
-    notif = create_notification(
+    create_notification(
         db, pred.user_id, NotificationType.refill, title, body,
         has_action=True, dedupe_window_minutes=60 * 12,  # 12 hour dedup
         metadata={
@@ -593,7 +593,7 @@ def _create_alert(db: Session, pred: MedicationPrediction) -> bool:
     # Push notification (overdue + high only)
     if pred.risk_level in ("overdue", "high"):
         try:
-            send_push_if_available(user, title, body)
+            run_in_background(send_push_if_available, user, title, body)
             pred.push_sent = True
         except Exception:
             pass
@@ -601,7 +601,7 @@ def _create_alert(db: Session, pred: MedicationPrediction) -> bool:
     # Email (overdue + high only)
     if pred.risk_level in ("overdue", "high"):
         try:
-            send_refill_email(user, title, body)
+            run_in_background(send_refill_email, user, title, body)
             pred.email_sent = True
         except Exception:
             pass

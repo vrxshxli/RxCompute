@@ -57,6 +57,7 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
   final Set<int> _spokenNotifIds = <int>{};
   final Map<String, DateTime> _speakDedupe = <String, DateTime>{};
   bool _refillPromptInProgress = false;
+  DateTime? _lastHomeRefreshFromNotif;
 
   @override
   void initState() {
@@ -239,11 +240,17 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
     try {
       final list = await _notificationRepository.getNotifications();
       if (list.isEmpty) return;
-      if (mounted) {
-        context.read<HomeBloc>().add(LoadHomeDataEvent());
-      }
       final sorted = [...list]..sort((a, b) => b.id.compareTo(a.id));
       final maxId = sorted.first.id;
+      final hasFresh = maxId > _lastSeenNotifId;
+      if (mounted && hasFresh) {
+        final now = DateTime.now();
+        final last = _lastHomeRefreshFromNotif;
+        if (last == null || now.difference(last).inSeconds >= 15) {
+          _lastHomeRefreshFromNotif = now;
+          context.read<HomeBloc>().add(LoadHomeDataEvent());
+        }
+      }
 
       if (!_didInitialNotificationSpeak || forceSpeakRefillOnOpen) {
         _didInitialNotificationSpeak = true;

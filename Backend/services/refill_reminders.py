@@ -8,7 +8,7 @@ from models.medicine import Medicine
 from models.notification import Notification, NotificationType
 from models.user import User
 from models.user_medication import UserMedication
-from services.notifications import create_notification, send_push_if_available, send_refill_email
+from services.notifications import create_notification, run_in_background, send_push_if_available, send_refill_email
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -67,8 +67,8 @@ def trigger_daily_refill_notifications_for_user(db: Session, current_user: User)
             body,
             has_action=True,
         )
-        send_push_if_available(current_user, title, body)
-        send_refill_email(current_user, title, body)
+        run_in_background(send_push_if_available, current_user, title, body)
+        run_in_background(send_refill_email, current_user, title, body)
         created_count += 1
 
     if created_count > 0:
