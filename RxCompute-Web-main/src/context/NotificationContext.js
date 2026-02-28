@@ -88,7 +88,7 @@ export function NotificationProvider({ children }) {
       return undefined;
     }
     fetchNotifications();
-    pollRef.current = window.setInterval(fetchNotifications, 5000);
+    pollRef.current = window.setInterval(fetchNotifications, 12000);
     const onFocus = () => fetchNotifications();
     const onVisibility = () => {
       if (document.visibilityState === "visible") fetchNotifications();

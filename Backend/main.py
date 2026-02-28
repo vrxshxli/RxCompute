@@ -82,11 +82,18 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# CORS — allow Flutter app on any origin during development
+# CORS — support local web dashboard + deployed clients.
+raw_origins = os.getenv(
+    "CORS_ORIGINS",
+    "http://localhost:3000,http://127.0.0.1:3000,https://rxcompute-web-main.onrender.com",
+)
+cors_origins = [o.strip() for o in raw_origins.split(",") if o.strip()]
+allow_any_origin = "*" in cors_origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=["*"] if allow_any_origin else cors_origins,
+    # Browsers reject wildcard+credentials; keep credentials off for bearer-token API calls.
+    allow_credentials=False if allow_any_origin else True,
     allow_methods=["*"],
     allow_headers=["*"],
 )

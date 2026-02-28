@@ -49,6 +49,7 @@ class RefillConfirmRequest(BaseModel):
     quantity_units: int = Field(default=1, ge=1, le=365)
     confirmation_checked: bool = False
     confirmation_source: str = "popup"
+    payment_method: str | None = "online"
     prescription_file: str | None = None
     dosage_instruction: str | None = None
     target_user_id: int | None = None
@@ -302,6 +303,9 @@ def confirm_refill_and_create_order(
         raise HTTPException(status_code=404, detail="Medicine not found for refill confirmation")
 
     qty = max(1, int(req.quantity_units or 1))
+    payment_method = (req.payment_method or "online").strip().lower()
+    if payment_method not in {"online", "cod", "upi", "card", "wallet", "netbanking"}:
+        payment_method = "online"
     dosage = (req.dosage_instruction or picked.get("dosage") or "As prescribed").strip()
     safety_payload = [{
         "medicine_id": med.id,
@@ -335,6 +339,39 @@ def confirm_refill_and_create_order(
         )
         raise HTTPException(status_code=400, detail={"message": reason, "safety_results": safety.get("safety_results", [])})
 
+    # Prevent duplicate refill orders for the same medicine while one is already active.
+    existing = (
+        db.query(Order)
+        .join(OrderItem, OrderItem.order_id == Order.id)
+        .filter(
+            Order.user_id == target_user_id,
+            OrderItem.medicine_id == med.id,
+            Order.order_uid.ilike("RFL-%"),
+            Order.status.in_(
+                [
+                    OrderStatus.pending,
+                    OrderStatus.confirmed,
+                    OrderStatus.verified,
+                    OrderStatus.picking,
+                    OrderStatus.packed,
+                    OrderStatus.dispatched,
+                ]
+            ),
+        )
+        .order_by(Order.created_at.desc())
+        .first()
+    )
+    if existing:
+        return {
+            "message": f"Refill order already active: {existing.order_uid}",
+            "order_id": existing.id,
+            "order_uid": existing.order_uid,
+            "status": existing.status.value,
+            "already_exists": True,
+            "payment_auto": True,
+            "payment_required": False,
+        }
+
     scheduler_result = route_order_to_pharmacy(user_id=target_user_id, order_items=safety_payload, dry_run=False)
     assigned_pharmacy = scheduler_result.get("assigned_pharmacy")
     order = Order(
@@ -343,7 +380,7 @@ def confirm_refill_and_create_order(
         status=OrderStatus.pending,
         total=float(med.price) * qty,
         pharmacy=assigned_pharmacy,
-        payment_method=None,  # Payment is intentionally not auto-completed.
+        payment_method=payment_method,
         delivery_address=target_user.location_text,
         delivery_lat=target_user.location_lat,
         delivery_lng=target_user.location_lng,
@@ -374,8 +411,8 @@ def confirm_refill_and_create_order(
     db.commit()
     db.refresh(order)
 
-    title = "Refill Order Created (Payment Pending)"
-    body = f"{order.order_uid} for {med.name} created after {req.confirmation_source} confirmation. Please complete payment to proceed."
+    title = "Refill Order Created"
+    body = f"{order.order_uid} for {med.name} created via {req.confirmation_source}. Payment marked successful ({payment_method.upper()})."
     create_notification(db, target_user_id, NotificationType.refill, title, body, has_action=True, dedupe_window_minutes=0)
     db.commit()
     run_in_background(send_push_to_token, target_user.push_token, title, body, target_user.id)
@@ -392,18 +429,20 @@ def confirm_refill_and_create_order(
             "medicine_name": med.name,
             "quantity_units": qty,
             "confirmation_source": req.confirmation_source,
-            "payment_auto": False,
+            "payment_auto": True,
+            "payment_method": payment_method,
             "scheduler_result": scheduler_result,
         },
         f"Prediction refill order created: {order.order_uid}",
     )
     return {
-        "message": "Refill order created successfully. Payment is pending.",
+        "message": "Refill order created successfully.",
         "order_id": order.id,
         "order_uid": order.order_uid,
         "status": order.status.value,
-        "payment_auto": False,
-        "payment_required": True,
+        "payment_auto": True,
+        "payment_required": False,
+        "payment_method": payment_method,
         "scheduler_result": scheduler_result,
     }
 

@@ -12,7 +12,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/rx_theme_ext.dart';
 import '../../../core/services/local_notification_service.dart';
-import '../../../config/routes.dart';
 import '../../../data/providers/api_provider.dart';
 import '../../../data/models/notification_model.dart';
 import '../../../data/repositories/medicine_repository.dart';
@@ -222,10 +221,9 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
         confirmationSource: 'popup_$trigger',
       );
       final uid = (res['order_uid'] ?? '').toString();
-      await _speak(uid.isNotEmpty ? 'Refill order $uid created. Proceed to payment.' : 'Refill order created. Proceed to payment.');
+      await _speak(uid.isNotEmpty ? 'Refill order $uid created successfully.' : 'Refill order created successfully.');
       if (!mounted) return;
       context.read<HomeBloc>().add(LoadHomeDataEvent());
-      Navigator.pushNamed(context, AppRoutes.payment);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -506,8 +504,8 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
         final uid = (res['order_uid'] ?? '').toString();
         await _speak(
           _voiceLanguage == 'hi-IN'
-              ? 'रीफिल ऑर्डर बन गया है ${uid.isNotEmpty ? uid : ''}. पेमेंट पेंडिंग है।'
-              : 'Refill order created ${uid.isNotEmpty ? uid : ''}. Payment is pending.',
+              ? 'रीफिल ऑर्डर बन गया है ${uid.isNotEmpty ? uid : ''}.'
+              : 'Refill order created ${uid.isNotEmpty ? uid : ''}.',
         );
       } catch (_) {
         await _speak(_voiceLanguage == 'hi-IN' ? 'रीफिल कन्फर्म नहीं हो पाया।' : 'Refill confirmation failed.');

@@ -345,7 +345,7 @@ class HomeTab extends StatelessWidget {
                         onChanged: (v) => setStateDialog(() => confirmed = v == true),
                       ),
                       const Expanded(
-                        child: Text('I confirm refill order creation. Payment will remain pending.'),
+                        child: Text('I confirm refill order creation.'),
                       ),
                     ],
                   ),
@@ -370,7 +370,7 @@ class HomeTab extends StatelessWidget {
                               context.read<HomeBloc>().add(LoadHomeDataEvent());
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
-                                  content: Text('Refill order created: ${res['order_uid'] ?? ''} (payment pending)'),
+                                  content: Text('Refill order created: ${res['order_uid'] ?? ''}'),
                                   backgroundColor: C.ok,
                                 ),
                               );
