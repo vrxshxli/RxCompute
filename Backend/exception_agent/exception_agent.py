@@ -427,6 +427,28 @@ def _classify_exception(
         _out({"type": exc.exception_type, "level": exc.escalation_level, "qty": qty})
         return exc
 
+    # ── DUPLICATE ACTIVE MEDICATION ─────────────────────
+    if rule == "duplicate_active_medication":
+        days_remaining = None
+        if isinstance(safety_result.get("detail"), dict):
+            days_remaining = safety_result.get("detail", {}).get("days_remaining")
+        exc.exception_type = "duplicate_active_medication"
+        exc.escalation_level = "L1"
+        exc.severity = "medium"
+        exc.auto_action = "Blocked duplicate order while existing course is still active."
+        if isinstance(days_remaining, int) and days_remaining > 0:
+            exc.patient_action = (
+                f"You already have active stock for {mname} for about {days_remaining} day(s). "
+                "Please wait until current course finishes."
+            )
+            exc.reasoning = f"Duplicate order blocked with active days remaining={days_remaining}."
+        else:
+            exc.patient_action = f"You already have active stock for {mname}. Please wait before placing the same order again."
+            exc.reasoning = "Duplicate order blocked due to active medication cycle."
+        exc.staff_action = ""
+        _out({"type": exc.exception_type, "level": exc.escalation_level, "medicine": mname})
+        return exc
+
     # ── MEDICINE NOT FOUND ──────────────────────────────
     if rule in ("medicine_not_found", "not_found"):
         exc.exception_type = "unknown_medicine"

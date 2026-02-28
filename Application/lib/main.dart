@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter_tts/flutter_tts.dart';
 
 import 'config/routes.dart';
 import 'core/theme/app_theme.dart';
@@ -22,6 +23,27 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
   debugPrint('📩 Background message: ${message.messageId}');
   await LocalNotificationService.showFromRemoteMessage(message);
+  await _bestEffortBackgroundSpeak(message);
+}
+
+Future<void> _bestEffortBackgroundSpeak(RemoteMessage message) async {
+  try {
+    final title = message.notification?.title ?? message.data['title']?.toString() ?? 'RxCompute';
+    final body = message.notification?.body ?? message.data['body']?.toString() ?? 'New update available';
+    final lang = (message.data['voice_lang']?.toString() ?? '').toLowerCase();
+    final tts = FlutterTts();
+    if (lang == 'hi' || lang == 'hi-in') {
+      await tts.setLanguage('hi-IN');
+    } else if (lang == 'mr' || lang == 'mr-in') {
+      await tts.setLanguage('mr-IN');
+    } else {
+      await tts.setLanguage('en-IN');
+    }
+    await tts.setSpeechRate(0.45);
+    await tts.speak('$title. $body');
+  } catch (_) {
+    // Background TTS is best-effort only; local notification sound still works.
+  }
 }
 
 void main() async {

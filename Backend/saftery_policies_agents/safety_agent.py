@@ -44,6 +44,7 @@ import mimetypes
 import re
 import io
 import shutil
+from datetime import datetime, timezone
 from math import ceil
 from urllib import request as urllib_request
 from langfuse.decorators import observe, langfuse_context
@@ -97,7 +98,7 @@ def run_safety_agent(state: AgentState) -> dict:
     # ── Load from DB + check rules ──────────────────────
     db = SessionLocal()
     try:
-        results = _load_and_check_all(db, matched)
+        results = _load_and_check_all(db, state.get("user_id", 0), matched)
     finally:
         db.close()
 
@@ -145,7 +146,7 @@ def run_safety_agent(state: AgentState) -> dict:
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 @observe(name="safety_load_medicines")
-def _load_and_check_all(db, matched: list[dict]) -> list[SafetyCheckResult]:
+def _load_and_check_all(db, user_id: int, matched: list[dict]) -> list[SafetyCheckResult]:
     """
     Single DB query to load all medicines, then check each.
     This is a separate Langfuse span so judges can see DB access time.
@@ -195,6 +196,8 @@ def _load_and_check_all(db, matched: list[dict]) -> list[SafetyCheckResult]:
             ocr_analysis = ocr_cache[key]
 
         result = _evaluate_rules(
+            db=db,
+            user_id=user_id,
             med=med,
             qty=qty,
             strips_count=strips_count,
@@ -219,6 +222,8 @@ def _load_and_check_all(db, matched: list[dict]) -> list[SafetyCheckResult]:
 
 @observe(name="safety_evaluate_rules")
 def _evaluate_rules(
+    db,
+    user_id: int,
     med: Medicine,
     qty: int,
     strips_count: int | None,
@@ -239,6 +244,23 @@ def _evaluate_rules(
     stock = med.stock or 0
     name = med.name
     strips = strips_count if (isinstance(strips_count, int) and strips_count > 0) else qty
+
+    # RULE 0: Duplicate active medication order block.
+    days_remaining = _active_days_remaining_for_user_medication(db, user_id, med.id)
+    if days_remaining is not None and days_remaining > 0:
+        reasoning = (
+            f"Duplicate order blocked for user_id={user_id}, medicine='{name}'. "
+            f"Existing tracked stock has {days_remaining} day(s) remaining."
+        )
+        _langfuse_output({"rule": "duplicate_active_medication", "status": "BLOCKED", "reasoning": reasoning})
+        return SafetyCheckResult(
+            medicine_id=med.id,
+            medicine_name=name,
+            status="blocked",
+            rule="duplicate_active_medication",
+            message=f"{name} still has approximately {days_remaining} day(s) remaining. Reorder is allowed only after current cycle is finished.",
+            detail={"days_remaining": days_remaining},
+        )
 
     # ────────────────────────────────────────────────────
     # RULE 1: Prescription Required
@@ -909,6 +931,32 @@ def _build_summary(blocks, warnings, approved) -> str:
     if approved:
         parts.append(f"✅ {len(approved)} medicine{'s' if len(approved) != 1 else ''} approved.")
     return "\n".join(parts)
+
+
+def _active_days_remaining_for_user_medication(db, user_id: int, medicine_id: int) -> int | None:
+    if not user_id or not medicine_id:
+        return None
+    from models.user_medication import UserMedication
+
+    row = (
+        db.query(UserMedication)
+        .filter(UserMedication.user_id == user_id, UserMedication.medicine_id == medicine_id)
+        .order_by(UserMedication.created_at.desc())
+        .first()
+    )
+    if not row:
+        return None
+    now = datetime.now(timezone.utc)
+    created = row.created_at or now
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=timezone.utc)
+    elapsed_days = max((now - created).days, 0)
+    freq = max(int(row.frequency_per_day or 1), 1)
+    qty = max(int(row.quantity_units or 0), 0)
+    remaining_units = max(qty - (elapsed_days * freq), 0)
+    if remaining_units <= 0:
+        return 0
+    return int(ceil(remaining_units / freq))
 
 
 def _langfuse_output(data: dict):

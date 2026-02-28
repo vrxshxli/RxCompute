@@ -97,6 +97,16 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
         final isOrder = lowered.contains('order');
         LocalNotificationService.show(title: title, body: body, id: DateTime.now().millisecondsSinceEpoch.remainder(1000000));
         _announceMessage(title: title, body: body, isSafety: isSafety, isRefill: isRefill, isOrder: isOrder);
+        if ((isOrder || isRefill || isSafety) && !_isListening) {
+          _speak(
+            _voiceLanguage == 'hi-IN'
+                ? 'आप वॉइस से ऑर्डर दे सकते हैं। बोलिए: ऑर्डर मेडिसिन नेम क्वांटिटी 1'
+                : _voiceLanguage == 'mr-IN'
+                    ? 'तुम्ही व्हॉइसने ऑर्डर करू शकता. बोला: ऑर्डर मेडिसिन नेम क्वांटिटी 1'
+                    : 'You can place order by voice. Say: order medicine name quantity 1',
+          );
+          _queueAutoVoiceStart();
+        }
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('$title: $body')),
         );
@@ -130,9 +140,7 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
     Future.delayed(const Duration(milliseconds: 1100), () async {
       if (!mounted) return;
       _autoVoiceStartQueued = false;
-      if (!_isListening) {
-        await _toggleListening();
-      }
+      if (!_isListening) await _startListeningWithRetry();
     });
   }
 
@@ -141,6 +149,7 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed) {
       _pollAndSpeakNotifications(forceSpeakRefillOnOpen: true);
       _maybePromptRefillConfirmation(trigger: 'app_resume');
+      _queueAutoVoiceStart();
     }
   }
 
@@ -420,6 +429,47 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
     }
   }
 
+  Future<bool> _ensureSpeechReady() async {
+    if (_speechReady) return true;
+    try {
+      _speechReady = await _speech.initialize();
+    } catch (_) {
+      _speechReady = false;
+    }
+    return _speechReady;
+  }
+
+  Future<void> _startListeningWithRetry() async {
+    final ok = await _ensureSpeechReady();
+    if (!ok) {
+      await _speak(
+        _voiceLanguage == 'hi-IN'
+            ? 'वॉइस रिकग्निशन अभी उपलब्ध नहीं है।'
+            : _voiceLanguage == 'mr-IN'
+                ? 'व्हॉइस रिकग्निशन सध्या उपलब्ध नाही.'
+                : 'Voice recognition is not available right now.',
+      );
+      return;
+    }
+    if (_isListening) return;
+    try {
+      await _speech.listen(
+        localeId: _speechLocale,
+        onResult: (result) async {
+          if (result.finalResult) {
+            if (mounted) setState(() => _isListening = false);
+            await _handleVoiceCommand(result.recognizedWords);
+          }
+        },
+        listenFor: const Duration(seconds: 14),
+        pauseFor: const Duration(seconds: 4),
+      );
+      if (mounted) setState(() => _isListening = true);
+    } catch (_) {
+      if (mounted) setState(() => _isListening = false);
+    }
+  }
+
   Future<void> _speak(String text) async {
     if (text.trim().isEmpty) return;
     try {
@@ -431,9 +481,15 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
   void _setVoiceLanguage(String code) {
     setState(() {
       _voiceLanguage = code;
-      _speechLocale = code == 'hi-IN' ? 'hi_IN' : 'en_IN';
+      _speechLocale = code == 'hi-IN' ? 'hi_IN' : (code == 'mr-IN' ? 'mr_IN' : 'en_IN');
     });
-    _speak(code == 'hi-IN' ? 'भाषा हिंदी पर सेट हो गई है।' : 'Language set to English.');
+    _speak(
+      code == 'hi-IN'
+          ? 'भाषा हिंदी पर सेट हो गई है।'
+          : code == 'mr-IN'
+              ? 'भाषा मराठीवर सेट झाली आहे.'
+              : 'Language set to English.',
+    );
   }
 
   Future<void> _handleVoiceCommand(String raw) async {
@@ -443,21 +499,25 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
 
     bool says(List<String> keys) => keys.any((k) => txt.contains(k));
 
-    if (says(['help', 'madad', 'सहायता'])) {
-      await _speak(_voiceLanguage == 'hi-IN'
-          ? 'आप बोल सकते हैं: ओपन होम, ओपन चैट, ऑर्डर ओमेगा थ्री क्वांटिटी 2, सेफ्टी चेक फॉर पैरासिटामोल क्वांटिटी 2, रीफिल कन्फर्म ओमेगा 3 क्वांटिटी 2, या रीड लेटेस्ट सेफ्टी अलर्ट।'
-          : 'You can say: open home, open chat, order omega three quantity 2, check safety for paracetamol quantity 2, confirm refill omega 3 quantity 2, or read latest safety alert.');
+    if (says(['help', 'madad', 'सहायता', 'madat', 'मदत'])) {
+      await _speak(
+        _voiceLanguage == 'hi-IN'
+            ? 'आप बोल सकते हैं: ओपन होम, ओपन चैट, ऑर्डर ओमेगा थ्री क्वांटिटी 2, सेफ्टी चेक फॉर पैरासिटामोल क्वांटिटी 2, रीफिल कन्फर्म ओमेगा 3 क्वांटिटी 2, या रीड लेटेस्ट सेफ्टी अलर्ट।'
+            : _voiceLanguage == 'mr-IN'
+                ? 'तुम्ही असे बोलू शकता: ओपन होम, ओपन चॅट, ऑर्डर ओमेगा थ्री क्वांटिटी 2, सेफ्टी चेक पॅरासिटामॉल क्वांटिटी 2, रिफिल कन्फर्म ओमेगा 3 क्वांटिटी 2.'
+                : 'You can say: open home, open chat, order omega three quantity 2, check safety for paracetamol quantity 2, confirm refill omega 3 quantity 2, or read latest safety alert.',
+      );
       return;
     }
 
-    if (says(['open home', 'go to home', 'home kholo', 'होम'])) {
+    if (says(['open home', 'go to home', 'home kholo', 'होम', 'home ughda', 'होम उघडा'])) {
       setState(() => _i = 0);
-      await _speak(_voiceLanguage == 'hi-IN' ? 'होम खोल दिया।' : 'Opening home.');
+      await _speak(_voiceLanguage == 'hi-IN' ? 'होम खोल दिया।' : _voiceLanguage == 'mr-IN' ? 'होम उघडले.' : 'Opening home.');
       return;
     }
-    if (says(['open chat', 'go to chat', 'chat kholo', 'चैट'])) {
+    if (says(['open chat', 'go to chat', 'chat kholo', 'चैट', 'चॅट उघडा'])) {
       setState(() => _i = 1);
-      await _speak(_voiceLanguage == 'hi-IN' ? 'चैट खोल दिया।' : 'Opening chat.');
+      await _speak(_voiceLanguage == 'hi-IN' ? 'चैट खोल दिया।' : _voiceLanguage == 'mr-IN' ? 'चॅट उघडले.' : 'Opening chat.');
       return;
     }
     if (says(['open meds', 'open medicine', 'go to meds', 'meds kholo', 'मेडिसिन'])) {
@@ -493,7 +553,7 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
           .replaceAll(RegExp(r'सेफ्टी चेक|के लिए|का|की|करो|करिए'), '')
           .trim();
       if (medQuery.isEmpty) {
-        await _speak(_voiceLanguage == 'hi-IN' ? 'कृपया मेडिसिन का नाम बोलें।' : 'Please tell the medicine name.');
+        await _speak(_voiceLanguage == 'hi-IN' ? 'कृपया मेडिसिन का नाम बोलें।' : _voiceLanguage == 'mr-IN' ? 'कृपया औषधाचे नाव सांगा.' : 'Please tell the medicine name.');
         return;
       }
       try {
@@ -523,7 +583,7 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
       return;
     }
 
-    if (says(['confirm refill', 'refill confirm', 'reorder refill', 'रीफिल कन्फर्म'])) {
+    if (says(['confirm refill', 'refill confirm', 'reorder refill', 'रीफिल कन्फर्म', 'refill kara', 'रिफिल करा'])) {
       final qtyMatch = RegExp(r'(quantity|qty)\s+(\d+)').firstMatch(txt);
       final qty = qtyMatch != null ? int.tryParse(qtyMatch.group(2) ?? '1') ?? 1 : 1;
       String medQuery = txt
@@ -532,7 +592,7 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
           .replaceAll(RegExp(r'\s+'), ' ')
           .trim();
       if (medQuery.isEmpty) {
-        await _speak(_voiceLanguage == 'hi-IN' ? 'कृपया मेडिसिन का नाम बोलें।' : 'Please tell the medicine name.');
+        await _speak(_voiceLanguage == 'hi-IN' ? 'कृपया मेडिसिन का नाम बोलें।' : _voiceLanguage == 'mr-IN' ? 'कृपया औषधाचे नाव सांगा.' : 'Please tell the medicine name.');
         return;
       }
       try {
@@ -553,9 +613,8 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
       return;
     }
 
-    if (says(['order ', 'place order', 'buy ', 'ऑर्डर ', 'order medicine'])) {
-      final qtyMatch = RegExp(r'(quantity|qty)\s+(\d+)').firstMatch(txt);
-      final qty = qtyMatch != null ? int.tryParse(qtyMatch.group(2) ?? '1') ?? 1 : 1;
+    if (says(['order ', 'place order', 'buy ', 'ऑर्डर ', 'order medicine', 'order karo', 'medicine order', 'ऑर्डर करा', 'order kara'])) {
+      final qty = _parseVoiceQuantity(txt);
       final isCod = txt.contains('cod') || txt.contains('cash on delivery');
       final payment = isCod ? 'cod' : 'online';
       String medQuery = txt
@@ -563,12 +622,19 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
           .replaceAll(RegExp(r'ऑर्डर|मेडिसिन|दवाई|क्वांटिटी'), ' ')
           .replaceAll(RegExp(r'\s+'), ' ')
           .trim();
+      medQuery = _normalizeVoiceMedicineQuery(medQuery);
       if (medQuery.isEmpty) {
-        await _speak(_voiceLanguage == 'hi-IN' ? 'कृपया मेडिसिन का नाम बताइए।' : 'Please tell the medicine name.');
+        await _speak(_voiceLanguage == 'hi-IN' ? 'कृपया मेडिसिन का नाम बताइए।' : _voiceLanguage == 'mr-IN' ? 'कृपया औषधाचे नाव सांगा.' : 'Please tell the medicine name.');
         return;
       }
       try {
-        final meds = await _medicineRepository.getMedicines(search: medQuery);
+        var meds = await _medicineRepository.getMedicines(search: medQuery);
+        if (meds.isEmpty && medQuery.contains(' ')) {
+          final firstToken = medQuery.split(' ').first.trim();
+          if (firstToken.isNotEmpty) {
+            meds = await _medicineRepository.getMedicines(search: firstToken);
+          }
+        }
         if (meds.isEmpty) {
           await _speak(_voiceLanguage == 'hi-IN' ? '$medQuery नहीं मिला।' : '$medQuery not found.');
           return;
@@ -588,15 +654,17 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
           paymentMethod: payment,
           source: 'voice_conversational_agent',
         );
-        await _speak(
-          _voiceLanguage == 'hi-IN'
-              ? 'ऑर्डर सफल हुआ। ऑर्डर आई डी ${order.orderUid}।'
-              : 'Order placed successfully. Order id ${order.orderUid}.',
-        );
+        await _speak(_voiceLanguage == 'hi-IN'
+            ? 'ऑर्डर सफल हुआ। ऑर्डर आई डी ${order.orderUid}।'
+            : _voiceLanguage == 'mr-IN'
+                ? 'ऑर्डर यशस्वी झाला. ऑर्डर आयडी ${order.orderUid}.'
+                : 'Order placed successfully. Order id ${order.orderUid}.');
       } catch (e) {
         await _speak(
           _voiceLanguage == 'hi-IN'
               ? 'वॉइस ऑर्डर अभी पूरा नहीं हो पाया। ${e.toString()}'
+              : _voiceLanguage == 'mr-IN'
+                  ? 'व्हॉइस ऑर्डर पूर्ण झाला नाही. ${e.toString()}'
               : 'Voice order failed. ${e.toString()}',
         );
       }
@@ -607,8 +675,13 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
   }
 
   Future<void> _toggleListening() async {
-    if (!_speechReady) {
-      await _speak(_voiceLanguage == 'hi-IN' ? 'वॉइस रिकग्निशन उपलब्ध नहीं है।' : 'Voice recognition is not available.');
+    final ok = await _ensureSpeechReady();
+    if (!ok) {
+      await _speak(_voiceLanguage == 'hi-IN'
+          ? 'वॉइस रिकग्निशन उपलब्ध नहीं है।'
+          : _voiceLanguage == 'mr-IN'
+              ? 'व्हॉइस रिकग्निशन उपलब्ध नाही.'
+              : 'Voice recognition is not available.');
       return;
     }
     if (_isListening) {
@@ -616,18 +689,40 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
       if (mounted) setState(() => _isListening = false);
       return;
     }
-    await _speech.listen(
-      localeId: _speechLocale,
-      onResult: (result) async {
-        if (result.finalResult) {
-          if (mounted) setState(() => _isListening = false);
-          await _handleVoiceCommand(result.recognizedWords);
-        }
-      },
-      listenFor: const Duration(seconds: 10),
-      pauseFor: const Duration(seconds: 3),
-    );
-    if (mounted) setState(() => _isListening = true);
+    await _startListeningWithRetry();
+  }
+
+  int _parseVoiceQuantity(String txt) {
+    final qtyMatch = RegExp(r'(quantity|qty|x)\s+(\d+)').firstMatch(txt);
+    if (qtyMatch != null) {
+      return int.tryParse(qtyMatch.group(2) ?? '1') ?? 1;
+    }
+    final direct = RegExp(r'\b(\d+)\b').firstMatch(txt);
+    if (direct != null) {
+      final parsed = int.tryParse(direct.group(1) ?? '1') ?? 1;
+      return parsed < 1 ? 1 : parsed;
+    }
+    if (txt.contains('one')) return 1;
+    if (txt.contains('two')) return 2;
+    if (txt.contains('three')) return 3;
+    if (txt.contains('four')) return 4;
+    if (txt.contains('five')) return 5;
+    if (txt.contains('एक')) return 1;
+    if (txt.contains('दोन')) return 2;
+    if (txt.contains('तीन')) return 3;
+    if (txt.contains('चार')) return 4;
+    if (txt.contains('पाच')) return 5;
+    return 1;
+  }
+
+  String _normalizeVoiceMedicineQuery(String q) {
+    var out = q.toLowerCase();
+    out = out.replaceAll('omega three', 'omega-3');
+    out = out.replaceAll('omega 3', 'omega-3');
+    out = out.replaceAll('vitamin d three', 'vitamin d3');
+    out = out.replaceAll('vitamin d 3', 'vitamin d3');
+    out = out.replaceAll(RegExp(r'\s+'), ' ').trim();
+    return out;
   }
 
   @override
@@ -668,6 +763,7 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
                 items: const [
                   DropdownMenuItem(value: 'en-IN', child: Text('EN')),
                   DropdownMenuItem(value: 'hi-IN', child: Text('HI')),
+                  DropdownMenuItem(value: 'mr-IN', child: Text('MR')),
                 ],
                 onChanged: (v) {
                   if (v != null) _setVoiceLanguage(v);
