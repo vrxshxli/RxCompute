@@ -29,6 +29,7 @@ from routers import (
 
 from routers import predictions_router
 from routers import order_agent_router
+from routers import exceptions_router
 
 
 # ─── Initialize Firebase Admin SDK ────────────────────────
@@ -106,6 +107,7 @@ app.include_router(safety_router)
 app.include_router(scheduler_router)
 app.include_router(predictions_router)
 app.include_router(order_agent_router)
+app.include_router(exceptions_router)
 
 uploads_path = os.path.join(os.path.dirname(__file__), "uploads")
 os.makedirs(uploads_path, exist_ok=True)

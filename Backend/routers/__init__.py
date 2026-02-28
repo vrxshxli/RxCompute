@@ -13,6 +13,8 @@ from routers.warehouse import router as warehouse_router
 from routers.safety import router as safety_router
 from routers.scheduler import router as scheduler_router
 from routers.predictions import router as predictions_router
+from routers.order_agent import router as order_agent_router
+from routers.exceptions import router as exceptions_router
 
 __all__ = [
     "auth_router",
