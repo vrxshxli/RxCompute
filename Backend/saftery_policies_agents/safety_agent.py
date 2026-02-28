@@ -51,6 +51,7 @@ from langfuse.decorators import observe, langfuse_context
 from database import SessionLocal
 from models.medicine import Medicine
 from saftery_policies_agents.state import AgentState, SafetyCheckResult
+from services.rx_knowledge import is_rx_required_from_knowledge
 
 try:
     import pytesseract
@@ -268,7 +269,11 @@ def _evaluate_rules(
     # USE CASE 1: Mucosolvan (rx_required=True), no prescription → BLOCK
     # USE CASE 8: Mucosolvan WITH prescription → PASS (continues to next rules)
     #
-    require_rx = bool(med.rx_required) or bool(item_rx_required)
+    require_rx = (
+        bool(med.rx_required)
+        or bool(item_rx_required)
+        or is_rx_required_from_knowledge(med.name, med.pzn, med.description)
+    )
     if require_rx and not rx_file:
         reasoning = (
             f"Medicine '{name}' has rx_required=True in database. "

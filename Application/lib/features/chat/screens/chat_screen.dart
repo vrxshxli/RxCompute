@@ -25,6 +25,8 @@ class _CS extends State<ChatScreen> {
   final stt.SpeechToText _speech = stt.SpeechToText();
   final FlutterTts _tts = FlutterTts();
   bool _speechReady = false;
+  bool _speechInitInProgress = false;
+  DateTime? _lastSpeechInitAttempt;
   final Set<String> _spokenMessageIds = <String>{};
   bool _spokeVoiceTextHint = false;
 
@@ -35,21 +37,49 @@ class _CS extends State<ChatScreen> {
   }
 
   Future<void> _initSpeech() async {
-    _speechReady = await _speech.initialize(
-      onStatus: (status) {
-        if ((status == 'done' || status == 'notListening') && mounted) {
-          final bloc = context.read<ChatBloc>();
-          if (bloc.state.isRecording) {
-            bloc.add(ToggleRecordingEvent());
-          }
-        }
-      },
-    );
+    _speechReady = await _ensureSpeechReadyFor('hi');
     try {
       await _tts.setLanguage('hi-IN');
       await _tts.setSpeechRate(0.45);
     } catch (_) {}
     if (mounted) setState(() {});
+  }
+
+  Future<bool> _ensureSpeechReadyFor(String langCode) async {
+    if (_speechReady) return true;
+    if (_speechInitInProgress) return false;
+    final now = DateTime.now();
+    if (_lastSpeechInitAttempt != null && now.difference(_lastSpeechInitAttempt!).inMilliseconds < 1200) {
+      return _speechReady;
+    }
+    _lastSpeechInitAttempt = now;
+    _speechInitInProgress = true;
+    try {
+      _speechReady = await _speech.initialize(
+        onStatus: (status) {
+          if ((status == 'done' || status == 'notListening') && mounted) {
+            final bloc = context.read<ChatBloc>();
+            if (bloc.state.isRecording) {
+              bloc.add(ToggleRecordingEvent());
+            }
+          }
+        },
+        onError: (_) {},
+      );
+      return _speechReady;
+    } catch (_) {
+      _speechReady = false;
+      return false;
+    } finally {
+      _speechInitInProgress = false;
+    }
+  }
+
+  String _localeFor(String langCode) {
+    final c = (langCode).toLowerCase();
+    if (c == 'hi') return 'hi_IN';
+    if (c == 'mr') return 'mr_IN';
+    return 'en_IN';
   }
 
   @override
@@ -77,7 +107,8 @@ class _CS extends State<ChatScreen> {
   }
 
   Future<void> _toggleVoice(ChatState state) async {
-    if (!_speechReady) {
+    final ready = await _ensureSpeechReadyFor(state.languageCode);
+    if (!ready) {
       await _speakText('Voice recognition is not available right now.');
       return;
     }
@@ -99,6 +130,7 @@ class _CS extends State<ChatScreen> {
         }
       },
       listenMode: stt.ListenMode.confirmation,
+      localeId: _localeFor(state.languageCode),
     );
   }
 
