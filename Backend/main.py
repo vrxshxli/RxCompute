@@ -24,6 +24,7 @@ from routers import (
     pharmacy_stores_router,
     warehouse_router,
     safety_router,
+    scheduler_router,
 )
 
 # ─── Initialize Firebase Admin SDK ────────────────────────
@@ -98,6 +99,7 @@ app.include_router(webhooks_router)
 app.include_router(pharmacy_stores_router)
 app.include_router(warehouse_router)
 app.include_router(safety_router)
+app.include_router(scheduler_router)
 
 uploads_path = os.path.join(os.path.dirname(__file__), "uploads")
 os.makedirs(uploads_path, exist_ok=True)

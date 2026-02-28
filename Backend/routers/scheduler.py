@@ -14,7 +14,7 @@ from database import get_db
 from dependencies import get_current_user
 from models.user import User
 from models.pharmacy_store import PharmacyStore
-from scheduler_agent.scheduler_agent import route_order_to_pharmacy
+from schedular_agent.schedular_agent import route_order_to_pharmacy
 
 router = APIRouter(prefix="/scheduler", tags=["Scheduler Agent"])
 STAFF = {"admin", "pharmacy_store", "warehouse"}
@@ -35,7 +35,7 @@ def grid_status(user: User = Depends(get_current_user), db: Session = Depends(ge
     """Full grid with live scores — for admin dashboard."""
     if user.role not in STAFF:
         raise HTTPException(403, "Staff only")
-    result = route_order_to_pharmacy(user_id=user.id, order_items=[])
+    result = route_order_to_pharmacy(user_id=user.id, order_items=[], dry_run=True)
     stores = db.query(PharmacyStore).order_by(PharmacyStore.node_id).all()
     ev_map = {e.get("node_id", ""): e for e in result.get("evaluations", [])}
     grid = [{
@@ -56,10 +56,5 @@ def simulate(user: User = Depends(get_current_user), db: Session = Depends(get_d
     """Dry run — judges see full Langfuse trace, no side effects."""
     if user.role not in STAFF:
         raise HTTPException(403, "Staff only")
-    result = route_order_to_pharmacy(user_id=user.id, order_items=[])
-    w = result.get("assigned_pharmacy")
-    if w and not result.get("fallback_used"):
-        s = db.query(PharmacyStore).filter(PharmacyStore.node_id == w).first()
-        if s and (s.load or 0) > 0:
-            s.load -= 1; db.commit()
-    return {"simulation": True, "note": "Load restored. Check Langfuse.", **result}
+    result = route_order_to_pharmacy(user_id=user.id, order_items=[], dry_run=True)
+    return {"simulation": True, "note": "Dry run only. No load mutated.", **result}

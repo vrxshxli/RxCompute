@@ -53,7 +53,9 @@ export function NotificationProvider({ children }) {
             }, 900);
             const safetyNote = newUnheard.find((n) => String(n.type || "").toLowerCase() === "safety");
             if (window.speechSynthesis && safetyNote) {
-              const msg = new SpeechSynthesisUtterance(`Safety alert. ${safetyNote.title || ""}. ${safetyNote.body || ""}`);
+              const text = `${safetyNote.title || ""} ${safetyNote.body || ""}`.toLowerCase();
+              const prefix = text.includes("scheduler") ? "Scheduler agent alert." : "Safety alert.";
+              const msg = new SpeechSynthesisUtterance(`${prefix} ${safetyNote.title || ""}. ${safetyNote.body || ""}`);
               msg.rate = 0.95;
               msg.pitch = 1.0;
               window.speechSynthesis.speak(msg);

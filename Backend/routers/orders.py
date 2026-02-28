@@ -23,6 +23,7 @@ from services.notifications import (
     send_safety_rejection_email,
 )
 from services.webhooks import dispatch_webhook
+from schedular_agent.schedular_agent import route_order_to_pharmacy
 
 router = APIRouter(prefix="/orders", tags=["Orders"])
 STAFF_ROLES = {"admin", "pharmacy_store"}
@@ -102,6 +103,7 @@ def _build_safety_trace_metadata(order: Order | None, safety: dict, phase: str) 
             }
         )
     return {
+        "agent_name": "safety_agent",
         "phase": phase,
         "order_id": getattr(order, "id", None) if order else None,
         "order_uid": getattr(order, "order_uid", None) if order else None,
@@ -110,6 +112,31 @@ def _build_safety_trace_metadata(order: Order | None, safety: dict, phase: str) 
         "safety_summary": safety.get("safety_summary"),
         "ocr_details": ocr_details,
         "safety_results": results,
+    }
+
+
+def _build_scheduler_trace_metadata(
+    order: Order | None,
+    scheduler_result: dict,
+    phase: str,
+    triggered_by: User | None = None,
+) -> dict:
+    return {
+        "agent_name": "scheduler_agent",
+        "phase": phase,
+        "order_id": getattr(order, "id", None) if order else None,
+        "order_uid": getattr(order, "order_uid", None) if order else None,
+        "assigned_pharmacy": scheduler_result.get("assigned_pharmacy"),
+        "routing_reason": scheduler_result.get("routing_reason"),
+        "fallback_used": bool(scheduler_result.get("fallback_used")),
+        "winning_score": scheduler_result.get("winning_score"),
+        "order_item_count": scheduler_result.get("order_item_count"),
+        "ranking": scheduler_result.get("ranking", []),
+        "disqualification_log": scheduler_result.get("disqualification_log", []),
+        "evaluations": scheduler_result.get("evaluations", []),
+        "target_user_id": getattr(order, "user_id", None) if order else None,
+        "triggered_by_user_id": triggered_by.id if triggered_by else None,
+        "triggered_by_role": triggered_by.role if triggered_by else None,
     }
 
 
@@ -131,6 +158,42 @@ def _publish_safety_trace_for_admins(
             dedupe_window_minutes=0,
             metadata=metadata,
         )
+
+
+def _publish_scheduler_alert(
+    db: Session,
+    assigned_node: str | None,
+    title: str,
+    body: str,
+    metadata: dict,
+) -> None:
+    admins = db.query(User).filter(User.role == "admin").all()
+    pharmacy_users = db.query(User).filter(User.role == "pharmacy_store").all()
+    for admin in admins:
+        create_notification(
+            db,
+            admin.id,
+            NotificationType.safety,
+            title,
+            body,
+            has_action=True,
+            dedupe_window_minutes=0,
+            metadata=metadata,
+        )
+    for user in pharmacy_users:
+        if assigned_node and _resolve_pharmacy_node_for_user(user, db) != assigned_node:
+            continue
+        create_notification(
+            db,
+            user.id,
+            NotificationType.safety,
+            title,
+            body,
+            has_action=True,
+            dedupe_window_minutes=0,
+            metadata=metadata,
+        )
+        run_in_background(send_push_to_token, user.push_token, title, body, user.id)
 
 
 def _auto_review_pending_for_pharmacy(db: Session, pharmacy_user: User) -> None:
@@ -388,7 +451,15 @@ def create_order(
     delivery_address = (data.delivery_address or current_user.location_text or "").strip() or None
     delivery_lat = data.delivery_lat if data.delivery_lat is not None else current_user.location_lat
     delivery_lng = data.delivery_lng if data.delivery_lng is not None else current_user.location_lng
-    assigned_pharmacy = data.pharmacy or _find_nearby_pharmacy_node(db, delivery_lat, delivery_lng)
+    assigned_pharmacy = data.pharmacy
+    scheduler_result = {}
+    if not assigned_pharmacy:
+        scheduler_result = route_order_to_pharmacy(
+            user_id=current_user.id,
+            order_items=safety_payload,
+            dry_run=False,
+        )
+        assigned_pharmacy = scheduler_result.get("assigned_pharmacy") or _find_nearby_pharmacy_node(db, delivery_lat, delivery_lng)
     order = Order(
         order_uid=_generate_order_uid(),
         user_id=current_user.id,
@@ -421,6 +492,16 @@ def create_order(
 
     db.commit()
     db.refresh(order)
+    if scheduler_result:
+        scheduler_meta = _build_scheduler_trace_metadata(order, scheduler_result, "order_scheduler_assign", current_user)
+        _publish_scheduler_alert(
+            db,
+            assigned_pharmacy,
+            "Scheduler Agent Decision",
+            scheduler_result.get("routing_reason", f"{order.order_uid} routed to {assigned_pharmacy}"),
+            scheduler_meta,
+        )
+        db.commit()
     order_snapshot = {
         "order_uid": order.order_uid,
         "status": order.status.value if hasattr(order.status, "value") else str(order.status),

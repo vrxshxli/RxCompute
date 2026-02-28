@@ -19,11 +19,12 @@ export default function AdminAgentTraces() {
       if (res.ok) {
         const mapped = (Array.isArray(data) ? data : []).map((e) => ({
           id: e.id,
-          agent_name: 'safety_agent',
+          agent_name: (e?.metadata?.agent_name || '').toString().trim() || (String(e.title || '').toLowerCase().includes('scheduler') ? 'scheduler_agent' : 'safety_agent'),
           action: `${e.title} — ${e.body}`,
           trace_id: `safety-${e.id}`,
           confidence:
             Number(e?.metadata?.ocr_details?.[0]?.confidence) ||
+            (e?.metadata?.agent_name === 'scheduler_agent' ? 0.93 : 0) ||
             (e.severity === 'blocked' ? 0.99 : e.severity === 'warning' ? 0.82 : 0.75),
           metadata: e.metadata || null,
           target_user_name: e.target_user_name || null,
@@ -85,6 +86,11 @@ export default function AdminAgentTraces() {
         <div style={{ fontSize:11, color:T.gray500 }}>
           Phase: {l?.metadata?.phase || '-'} · Triggered by: {l?.metadata?.triggered_by_role || '-'} {l?.metadata?.triggered_by_user_id ? `#${l.metadata.triggered_by_user_id}` : ''}
         </div>
+        {l?.metadata?.agent_name === 'scheduler_agent' ? (
+          <div style={{ fontSize:11, color:T.gray700, lineHeight:1.5 }}>
+            Assigned: {l?.metadata?.assigned_pharmacy || '-'} · Score: {l?.metadata?.winning_score ?? '-'} · Fallback: {l?.metadata?.fallback_used ? 'Yes' : 'No'}
+          </div>
+        ) : null}
         {Array.isArray(l?.metadata?.ocr_details) && l.metadata.ocr_details.length ? (
           <div style={{ border:`1px solid ${T.gray200}`, borderRadius:8, padding:10, background:T.gray50 }}>
             {l.metadata.ocr_details.map((d, idx) => (

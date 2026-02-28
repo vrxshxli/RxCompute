@@ -184,6 +184,7 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
     bool isOrder = false,
     bool highPriority = false,
   }) {
+    final isScheduler = ('$title $body').toLowerCase().contains('scheduler');
     final key = '${title.trim()}|${body.trim()}'.toLowerCase();
     final now = DateTime.now();
     final last = _speakDedupe[key];
@@ -197,6 +198,10 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
       Future.delayed(const Duration(milliseconds: 900), () {
         _audioPlayer.play(AssetSource('sounds/rx_tune.wav'));
       });
+    }
+    if (isSafety && isScheduler) {
+      _speak('Scheduler agent alert. $title. $body');
+      return;
     }
     if (isSafety) {
       _speak('Safety alert. $title. $body');

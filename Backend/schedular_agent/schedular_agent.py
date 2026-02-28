@@ -149,7 +149,7 @@ def run_scheduler_agent(state: dict) -> dict:
 # ━━━ OPTIMIZATION ENGINE ━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 @observe(name="scheduler_optimize")
-def _optimize(db: Session, items: list[dict], plat: float, plng: float) -> Decision:
+def _optimize(db: Session, items: list[dict], plat: float, plng: float, dry_run: bool = False) -> Decision:
     dec = Decision(patient_lat=plat, patient_lng=plng, item_count=len(items))
 
     stores = db.query(PharmacyStore).all()
@@ -169,13 +169,14 @@ def _optimize(db: Session, items: list[dict], plat: float, plng: float) -> Decis
         dec.fallback = True
         pool = [e for e in evals if e.active] or evals
         fb = min(pool, key=lambda e: e.current_load)
-        _inc_load(db, fb.node_id)
+        if not dry_run:
+            _inc_load(db, fb.node_id)
         dec.pharmacy, dec.pharmacy_name, dec.pharmacy_location, dec.score = fb.node_id, fb.name, fb.location, 0
         dec.reason = f"FALLBACK: All {dec.total_cand} disqualified. Assigned {fb.node_id} ({fb.name}) — lowest load."
         dec.ranking = [{"rank": 1, "node_id": fb.node_id, "score": 0, "fallback": True}]
         return dec
 
-    ok.sort(key=lambda e: (-e.total, e.current_load, e.distance_km))
+    ok.sort(key=lambda e: (-e.total, e.current_load, e.distance_km, e.node_id))
     dec.ranking = [
         {"rank": i+1, "node_id": e.node_id, "name": e.name, "score": round(e.total, 2),
          "distance_km": round(e.distance_km, 1), "eta_min": round(e.eta_min),
@@ -183,7 +184,8 @@ def _optimize(db: Session, items: list[dict], plat: float, plng: float) -> Decis
         for i, e in enumerate(ok)]
 
     w = ok[0]
-    _inc_load(db, w.node_id)
+    if not dry_run:
+        _inc_load(db, w.node_id)
     dec.pharmacy, dec.pharmacy_name, dec.pharmacy_location, dec.score = w.node_id, w.name, w.location, w.total
 
     if len(ok) == 1:
@@ -203,8 +205,11 @@ def _eval(db: Session, store: PharmacyStore, items: list[dict], plat: float, pln
         node_id=store.node_id, name=store.name, location=store.location,
         active=store.active, current_load=store.load or 0, stock_count=store.stock_count or 0,
         store_db_id=store.id)
-    c = PHARMACY_COORDS.get(store.node_id)
-    ev.lat, ev.lng = c if c else (DEFAULT_LAT, DEFAULT_LNG)
+    if store.location_lat is not None and store.location_lng is not None:
+        ev.lat, ev.lng = float(store.location_lat), float(store.location_lng)
+    else:
+        c = PHARMACY_COORDS.get(store.node_id)
+        ev.lat, ev.lng = c if c else (DEFAULT_LAT, DEFAULT_LNG)
 
     ev.queue_depth = db.query(sqlfunc.count(Order.id)).filter(
         Order.pharmacy == store.node_id,
@@ -335,10 +340,10 @@ def _out(d):
 # ━━━ PUBLIC STANDALONE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 @observe(name="scheduler_standalone")
-def route_order_to_pharmacy(user_id=0, order_items=None):
+def route_order_to_pharmacy(user_id=0, order_items=None, dry_run: bool = False):
     db = SessionLocal()
     try:
         plat, plng = _patient_loc(db, user_id)
-        dec = _optimize(db, order_items or [], plat, plng)
+        dec = _optimize(db, order_items or [], plat, plng, dry_run=dry_run)
     finally: db.close()
     return dec.to_dict()

@@ -98,9 +98,9 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   final ChatRepository _chatRepo = ChatRepository();
   final UserRepository _userRepo = UserRepository();
 
-  static const String _chatMessagesKey = 'chat_messages_v1';
-  static const String _chatLangKey = 'chat_language_v1';
-  static const String _chatAliasesKey = 'chat_medicine_aliases_v1';
+  static const String _chatMessagesKeyBase = 'chat_messages_v1';
+  static const String _chatLangKeyBase = 'chat_language_v1';
+  static const String _chatAliasesKeyBase = 'chat_medicine_aliases_v1';
 
   MedicineModel? _draftMedicine;
   String? _draftDosage;
@@ -112,6 +112,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   List<MedicineModel> _candidateMedicines = const [];
   _ChatLang _lang = _ChatLang.hi;
   _ChatStage _stage = _ChatStage.language;
+  String _chatScope = 'guest';
 
   ChatBloc() : super(const ChatState()) {
     on<LoadChatEvent>(_onLoad);
@@ -124,6 +125,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
 
   Future<void> _onLoad(LoadChatEvent event, Emitter<ChatState> emit) async {
     final prefs = await SharedPreferences.getInstance();
+    await _loadUserScope();
     final saved = prefs.getStringList(_chatMessagesKey) ?? [];
     final langCode = prefs.getString(_chatLangKey);
     if (langCode == 'en') _lang = _ChatLang.en;
@@ -694,6 +696,19 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     await prefs.setString(_chatLangKey, _lang.code);
     await prefs.setStringList(_chatMessagesKey, messages.map(_encodeMessage).toList());
   }
+
+  Future<void> _loadUserScope() async {
+    try {
+      final profile = await _userRepo.getProfile();
+      _chatScope = 'u_${profile.id}';
+    } catch (_) {
+      _chatScope = 'guest';
+    }
+  }
+
+  String get _chatMessagesKey => '${_chatMessagesKeyBase}_$_chatScope';
+  String get _chatLangKey => '${_chatLangKeyBase}_$_chatScope';
+  String get _chatAliasesKey => '${_chatAliasesKeyBase}_$_chatScope';
 
   String _encodeMessage(ChatMessage m) {
     final meds = (m.medicines ?? [])
