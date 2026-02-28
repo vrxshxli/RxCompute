@@ -267,6 +267,8 @@ def _infer_agent_name(title: str, body: str, metadata: dict | None) -> str:
         return "scheduler_agent"
     if "exception" in txt:
         return "exception_agent"
+    if "conversation" in txt or "conversational" in txt or "chat" in txt:
+        return "conversational_agent"
     if "demand forecast" in txt or "demand_forecast" in txt:
         return "demand_forecast_agent"
     if "order agent" in txt or "order_agent" in txt:

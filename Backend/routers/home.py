@@ -180,7 +180,33 @@ def get_home_summary(
         .all()
     )
     med_out = [_to_out(db, record, med) for record, med in meds]
-    refill_alert = min(med_out, key=lambda m: m.days_left) if med_out else None
+    active_refill_med_ids = {
+        int(mid)
+        for (mid,) in (
+            db.query(OrderItem.medicine_id)
+            .join(Order, Order.id == OrderItem.order_id)
+            .filter(
+                Order.user_id == current_user.id,
+                Order.order_uid.ilike("RFL-%"),
+                Order.status.in_(
+                    [
+                        OrderStatus.pending,
+                        OrderStatus.confirmed,
+                        OrderStatus.verified,
+                        OrderStatus.picking,
+                        OrderStatus.packed,
+                        OrderStatus.dispatched,
+                    ]
+                ),
+                OrderItem.medicine_id.isnot(None),
+            )
+            .distinct()
+            .all()
+        )
+        if mid is not None
+    }
+    refill_candidates = [m for m in med_out if m.medicine_id not in active_refill_med_ids]
+    refill_alert = min(refill_candidates, key=lambda m: m.days_left) if refill_candidates else None
 
     month_start = datetime.utcnow() - timedelta(days=30)
     monthly_orders = (

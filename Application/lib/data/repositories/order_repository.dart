@@ -43,4 +43,30 @@ class OrderRepository {
     );
     return OrderModel.fromJson(res.data);
   }
+
+  Future<OrderModel> createOrderViaAgent({
+    required List<Map<String, dynamic>> items,
+    String? paymentMethod,
+    String? deliveryAddress,
+    double? deliveryLat,
+    double? deliveryLng,
+    String source = 'api',
+  }) async {
+    final res = await _api.dio.post('${ApiConfig.orderAgent}/execute', data: {
+      'items': items,
+      'payment_method': paymentMethod ?? 'online',
+      if (deliveryAddress != null) 'delivery_address': deliveryAddress,
+      if (deliveryLat != null) 'delivery_lat': deliveryLat,
+      if (deliveryLng != null) 'delivery_lng': deliveryLng,
+      'source': source,
+    });
+    final data = Map<String, dynamic>.from(res.data as Map);
+    final ok = data['success'] == true;
+    final orderId = data['order_id'];
+    if (!ok || orderId is! int) {
+      final err = (data['error'] ?? data['safety_summary'] ?? 'Order placement failed').toString();
+      throw Exception(err);
+    }
+    return getOrder(orderId);
+  }
 }

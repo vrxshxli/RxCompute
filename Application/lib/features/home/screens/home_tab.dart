@@ -375,10 +375,15 @@ class HomeTab extends StatelessWidget {
                                 ),
                               );
                             }
-                          } catch (_) {
+                          } catch (e) {
                             if (context.mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Refill confirmation failed'), backgroundColor: C.err),
+                                SnackBar(
+                                  content: Text(
+                                    'Refill confirmation failed: ${e.toString().replaceAll('Exception: ', '')}',
+                                  ),
+                                  backgroundColor: C.err,
+                                ),
                               );
                             }
                           }

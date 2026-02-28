@@ -11,10 +11,12 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from dependencies import get_current_user
+from models.notification import NotificationType
 from models.user import User
 from order_agent.order_agent import place_order
 from saftery_policies_agents.graph import process_with_safety
 from schedular_agent.schedular_agent import route_order_to_pharmacy
+from services.notifications import create_notification
 
 router = APIRouter(prefix="/order-agent", tags=["Order Agent"])
 
@@ -35,6 +37,42 @@ class ExecuteRequest(BaseModel):
     delivery_address: str = ""
     delivery_lat: float | None = None
     delivery_lng: float | None = None
+    source: str = "api"
+
+
+def _publish_agent_trace(
+    db: Session,
+    *,
+    actor: User,
+    target_user_id: int,
+    agent_name: str,
+    phase: str,
+    title: str,
+    body: str,
+    payload: dict | None = None,
+) -> None:
+    admins = db.query(User).filter(User.role == "admin").all()
+    metadata = {
+        "agent_name": agent_name,
+        "phase": phase,
+        "target_user_id": target_user_id,
+        "target_user_name": actor.name if actor.id == target_user_id else None,
+        "triggered_by_user_id": actor.id,
+        "triggered_by_role": actor.role,
+        **(payload or {}),
+    }
+    for admin in admins:
+        create_notification(
+            db,
+            admin.id,
+            NotificationType.safety,
+            title,
+            body,
+            has_action=True,
+            dedupe_window_minutes=0,
+            metadata=metadata,
+        )
+    db.commit()
 
 
 @router.post("/execute")
@@ -63,6 +101,28 @@ def execute_full_pipeline(
         raise HTTPException(400, "No items")
 
     items_dicts = [it.model_dump() for it in data.items]
+    source = (data.source or "api").strip().lower()
+    _publish_agent_trace(
+        db,
+        actor=current_user,
+        target_user_id=current_user.id,
+        agent_name="order_agent",
+        phase="order_agent_execute_start",
+        title="Order Agent Trace",
+        body=f"Order agent pipeline started via {source}.",
+        payload={"source": source, "item_count": len(items_dicts)},
+    )
+    if source in {"chat", "conversational", "conversational_agent"}:
+        _publish_agent_trace(
+            db,
+            actor=current_user,
+            target_user_id=current_user.id,
+            agent_name="conversational_agent",
+            phase="conversation_order_intent",
+            title="Conversational Agent Trace",
+            body="Conversation agent confirmed order intent and delegated to order agent.",
+            payload={"source": source, "item_count": len(items_dicts)},
+        )
 
     # STEP 1: Safety check
     safety = process_with_safety(
@@ -72,6 +132,16 @@ def execute_full_pipeline(
     )
 
     if safety.get("has_blocks"):
+        _publish_agent_trace(
+            db,
+            actor=current_user,
+            target_user_id=current_user.id,
+            agent_name="order_agent",
+            phase="order_agent_blocked_by_safety",
+            title="Order Agent Trace",
+            body="Order agent execution blocked by safety checks.",
+            payload={"source": source, "safety_summary": safety.get("safety_summary", "")},
+        )
         return {
             "success": False,
             "stage": "safety_agent",
@@ -96,6 +166,22 @@ def execute_full_pipeline(
         delivery_address=data.delivery_address,
         delivery_lat=data.delivery_lat,
         delivery_lng=data.delivery_lng,
+    )
+    _publish_agent_trace(
+        db,
+        actor=current_user,
+        target_user_id=current_user.id,
+        agent_name="order_agent",
+        phase="order_agent_execute_complete",
+        title="Order Agent Trace",
+        body=f"Order agent execution completed ({'success' if result.get('success') else 'failed'}).",
+        payload={
+            "source": source,
+            "order_id": result.get("order_id"),
+            "order_uid": result.get("order_uid"),
+            "success": bool(result.get("success")),
+            "error": result.get("error", ""),
+        },
     )
 
     return {
@@ -141,5 +227,15 @@ def place_direct(
         delivery_address=data.delivery_address,
         delivery_lat=data.delivery_lat,
         delivery_lng=data.delivery_lng,
+    )
+    _publish_agent_trace(
+        db,
+        actor=current_user,
+        target_user_id=current_user.id,
+        agent_name="order_agent",
+        phase="order_agent_place_direct",
+        title="Order Agent Trace",
+        body=f"Direct order agent placement {'succeeded' if result.get('success') else 'failed'}.",
+        payload={"order_id": result.get("order_id"), "order_uid": result.get("order_uid"), "error": result.get("error", "")},
     )
     return result

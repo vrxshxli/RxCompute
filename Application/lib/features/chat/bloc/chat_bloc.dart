@@ -640,7 +640,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       deliveryLat = profile.locationLat;
       deliveryLng = profile.locationLng;
     } catch (_) {}
-    return _orderRepo.createOrder(
+    return _orderRepo.createOrderViaAgent(
       items: [
         {
           'medicine_id': _draftMedicine!.id,
@@ -656,6 +656,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       deliveryAddress: deliveryAddress,
       deliveryLat: deliveryLat,
       deliveryLng: deliveryLng,
+      source: 'conversational_agent',
     );
   }
 

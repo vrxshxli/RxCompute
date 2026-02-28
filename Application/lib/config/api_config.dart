@@ -24,6 +24,7 @@ class ApiConfig {
 
   // Orders
   static const String orders = '/orders';
+  static const String orderAgent = '/order-agent';
 
   // Notifications
   static const String notifications = '/notifications';

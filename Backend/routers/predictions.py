@@ -123,6 +123,30 @@ def _resolve_medicine_from_name(db: Session, raw_name: str | None) -> Medicine |
     return db.query(Medicine).filter(Medicine.name.ilike(f"%{txt}%")).order_by(Medicine.name.asc()).first()
 
 
+def _find_active_refill_order(db: Session, user_id: int, medicine_id: int) -> Order | None:
+    return (
+        db.query(Order)
+        .join(OrderItem, OrderItem.order_id == Order.id)
+        .filter(
+            Order.user_id == user_id,
+            OrderItem.medicine_id == medicine_id,
+            Order.order_uid.ilike("RFL-%"),
+            Order.status.in_(
+                [
+                    OrderStatus.pending,
+                    OrderStatus.confirmed,
+                    OrderStatus.verified,
+                    OrderStatus.picking,
+                    OrderStatus.packed,
+                    OrderStatus.dispatched,
+                ]
+            ),
+        )
+        .order_by(Order.created_at.desc())
+        .first()
+    )
+
+
 def _sync_user_medication_after_refill_order(
     db: Session,
     *,
@@ -249,9 +273,21 @@ def refill_candidates(
         publish_trace=False,
     )
     preds = [p for p in (result.get("predictions") or []) if int(p.get("days_remaining", 9999)) <= 7]
+    # Avoid repeated/manual reorder prompts when an active refill order already exists.
+    filtered: list[dict] = []
+    for p in preds:
+        mid = p.get("medicine_id")
+        if not isinstance(mid, int):
+            filtered.append(p)
+            continue
+        active_refill = _find_active_refill_order(db, resolved_user_id, mid)
+        if active_refill:
+            continue
+        filtered.append(p)
+    preds = filtered
     for p in preds:
         p["confirmation_required"] = True
-        p["payment_auto"] = False
+        p["payment_auto"] = True
     return {
         "user_id": resolved_user_id,
         "candidates": preds,
@@ -277,6 +313,34 @@ def confirm_refill_and_create_order(
     if not target_user:
         raise HTTPException(status_code=404, detail="Target user not found")
 
+    # Resolve medicine from request first so we can short-circuit duplicate active refill orders
+    # before running prediction gates.
+    med: Medicine | None = None
+    if req.medicine_id is not None:
+        med = db.query(Medicine).filter(Medicine.id == req.medicine_id).first()
+    if not med and req.medication_id:
+        rec = (
+            db.query(UserMedication)
+            .filter(UserMedication.id == req.medication_id, UserMedication.user_id == target_user_id)
+            .first()
+        )
+        if rec and rec.medicine_id:
+            med = db.query(Medicine).filter(Medicine.id == rec.medicine_id).first()
+    if not med and req.medicine_name:
+        med = _resolve_medicine_from_name(db, req.medicine_name)
+    if med:
+        existing = _find_active_refill_order(db, target_user_id, med.id)
+        if existing:
+            return {
+                "message": f"Refill order already active: {existing.order_uid}",
+                "order_id": existing.id,
+                "order_uid": existing.order_uid,
+                "status": existing.status.value,
+                "already_exists": True,
+                "payment_auto": True,
+                "payment_required": False,
+            }
+
     pred_result = run_prediction_for_user(
         target_user_id,
         create_alerts=False,
@@ -292,9 +356,13 @@ def confirm_refill_and_create_order(
         raise HTTPException(status_code=400, detail="No matching prediction found")
 
     medicine_id = req.medicine_id or picked.get("medicine_id")
-    med = db.query(Medicine).filter(Medicine.id == medicine_id).first() if medicine_id else None
+    med = med or (db.query(Medicine).filter(Medicine.id == medicine_id).first() if medicine_id else None)
     if not med and req.medication_id:
-        rec = db.query(UserMedication).filter(UserMedication.id == req.medication_id, UserMedication.user_id == target_user_id).first()
+        rec = (
+            db.query(UserMedication)
+            .filter(UserMedication.id == req.medication_id, UserMedication.user_id == target_user_id)
+            .first()
+        )
         if rec and rec.medicine_id:
             med = db.query(Medicine).filter(Medicine.id == rec.medicine_id).first()
     if not med:
@@ -340,27 +408,7 @@ def confirm_refill_and_create_order(
         raise HTTPException(status_code=400, detail={"message": reason, "safety_results": safety.get("safety_results", [])})
 
     # Prevent duplicate refill orders for the same medicine while one is already active.
-    existing = (
-        db.query(Order)
-        .join(OrderItem, OrderItem.order_id == Order.id)
-        .filter(
-            Order.user_id == target_user_id,
-            OrderItem.medicine_id == med.id,
-            Order.order_uid.ilike("RFL-%"),
-            Order.status.in_(
-                [
-                    OrderStatus.pending,
-                    OrderStatus.confirmed,
-                    OrderStatus.verified,
-                    OrderStatus.picking,
-                    OrderStatus.packed,
-                    OrderStatus.dispatched,
-                ]
-            ),
-        )
-        .order_by(Order.created_at.desc())
-        .first()
-    )
+    existing = _find_active_refill_order(db, target_user_id, med.id)
     if existing:
         return {
             "message": f"Refill order already active: {existing.order_uid}",
