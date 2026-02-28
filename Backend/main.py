@@ -27,6 +27,10 @@ from routers import (
     scheduler_router,
 )
 
+from routers import predictions_router
+
+
+
 # ─── Initialize Firebase Admin SDK ────────────────────────
 if not firebase_admin._apps:
     firebase_sa = os.getenv("FIREBASE_SERVICE_ACCOUNT")
@@ -100,6 +104,7 @@ app.include_router(pharmacy_stores_router)
 app.include_router(warehouse_router)
 app.include_router(safety_router)
 app.include_router(scheduler_router)
+app.include_router(predictions_router)
 
 uploads_path = os.path.join(os.path.dirname(__file__), "uploads")
 os.makedirs(uploads_path, exist_ok=True)

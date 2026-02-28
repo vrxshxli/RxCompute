@@ -7,7 +7,7 @@ from firebase_admin import credentials
 
 from database import SessionLocal
 from services.refill_reminders import trigger_daily_refill_notifications_for_all_users
-
+from prediction_agent.prediction_agent import run_prediction_scan
 
 def init_firebase():
     if firebase_admin._apps:
@@ -39,8 +39,13 @@ def main():
     init_firebase()
     db = SessionLocal()
     try:
+        # Existing refill reminders
         count = trigger_daily_refill_notifications_for_all_users(db)
-        print(f"Daily refill reminder job complete: {count} notification(s) created")
+        print(f"Refill reminders: {count}")
+
+        # NEW: Full prediction scan with velocity + risk + demand
+        result = run_prediction_scan()
+        print(f"Prediction scan: {result['risk_summary']}")
     finally:
         db.close()
 
