@@ -172,6 +172,7 @@ def _load_and_check_all(db, matched: list[dict]) -> list[SafetyCheckResult]:
         strips_count = item.get("strips_count")
         rx_file = item.get("prescription_file")
         item_name = item.get("name")
+        item_rx_required = bool(item.get("rx_required", False))
 
         med = med_map.get(mid)
 
@@ -200,6 +201,7 @@ def _load_and_check_all(db, matched: list[dict]) -> list[SafetyCheckResult]:
             dosage_instruction=dosage_instruction,
             rx_file=rx_file,
             item_name=item_name,
+            item_rx_required=item_rx_required,
             ocr_analysis=ocr_analysis,
         )
         results.append(result)
@@ -223,6 +225,7 @@ def _evaluate_rules(
     dosage_instruction: str | None,
     rx_file: str | None,
     item_name: str | None = None,
+    item_rx_required: bool = False,
     ocr_analysis: dict | None = None,
 ) -> SafetyCheckResult:
     """
@@ -243,7 +246,8 @@ def _evaluate_rules(
     # USE CASE 1: Mucosolvan (rx_required=True), no prescription → BLOCK
     # USE CASE 8: Mucosolvan WITH prescription → PASS (continues to next rules)
     #
-    if med.rx_required and not rx_file:
+    require_rx = bool(med.rx_required) or bool(item_rx_required)
+    if require_rx and not rx_file:
         reasoning = (
             f"Medicine '{name}' has rx_required=True in database. "
             f"User did NOT provide a prescription_file (value: {rx_file}). "
@@ -259,7 +263,7 @@ def _evaluate_rules(
         )
 
     # RULE 1b: Prescription file must look valid and clear (extension/path sanity).
-    if med.rx_required and rx_file:
+    if require_rx and rx_file:
         rx = str(rx_file).strip()
         rx_l = rx.lower()
         allowed_ext = {".jpg", ".jpeg", ".png", ".pdf", ".webp"}
@@ -807,6 +811,11 @@ def _prescription_mentions_medicine(text: str, medicine_name: str) -> bool:
 def _prescription_mentions_dosage(text: str, dosage_instruction: str) -> bool:
     t = _normalize_text(text)
     d = _normalize_text(dosage_instruction)
+    if not d:
+        return False
+    # Ambiguous bare number like "2" is not an acceptable dosage instruction.
+    if re.fullmatch(r"\d+", d):
+        return False
     if d in t:
         return True
     # Accept numeric schedule presence (e.g. 1-0-1, 1 0 1).
@@ -820,7 +829,6 @@ def _prescription_mentions_dosage(text: str, dosage_instruction: str) -> bool:
 def _prescription_mentions_strips(text: str, strips: int) -> bool:
     t = _normalize_text(text)
     patterns = [
-        f"{strips}",
         f"{strips} strip",
         f"{strips} strips",
         f"{strips} tab",
@@ -871,7 +879,8 @@ def _estimate_daily_units_from_dosage(dosage_instruction: str) -> int | None:
         return 2
     if "thrice daily" in d or "tid" in d:
         return 3
-    return nums[0] if nums else None
+    # Do not infer from a single bare number without clear schedule context.
+    return None
 
 
 def _extract_units_per_strip(package: str | None) -> int:
