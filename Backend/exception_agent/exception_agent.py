@@ -456,21 +456,21 @@ def _escalate(db: Session, user: User | None, exc: ExceptionCase):
     if exc.escalation_level == "L2":
         # Pharmacist review
         targets = db.query(User).filter(User.role == "pharmacy_store").all()
-        title = f"Pharmacist Review: {exc.medicine_name}"
+        title = f"Exception Agent: Pharmacist Review: {exc.medicine_name}"
         body = exc.staff_action
         notif_type = NotificationType.safety
 
     elif exc.escalation_level == "L3":
         # Admin + pharmacist
         targets = db.query(User).filter(User.role.in_(["admin", "pharmacy_store"])).all()
-        title = f"ESCALATION: {exc.medicine_name}"
+        title = f"Exception Agent: ESCALATION: {exc.medicine_name}"
         body = exc.staff_action
         notif_type = NotificationType.safety
 
     elif exc.escalation_level == "L4":
         # Everyone — critical safety
         targets = db.query(User).filter(User.role.in_(["admin", "pharmacy_store", "warehouse"])).all()
-        title = f"CRITICAL SAFETY: {exc.medicine_name}"
+        title = f"Exception Agent: CRITICAL SAFETY: {exc.medicine_name}"
         body = exc.staff_action
         notif_type = NotificationType.safety
     else:
@@ -481,6 +481,61 @@ def _escalate(db: Session, user: User | None, exc: ExceptionCase):
             db, staff.id, notif_type, title, body,
             has_action=True, dedupe_window_minutes=30,
             metadata={
+                "agent_name": "exception_agent",
+                "phase": "exception_escalate",
+                "exception_type": exc.exception_type,
+                "escalation_level": exc.escalation_level,
+                "severity": exc.severity,
+                "medicine_id": exc.medicine_id,
+                "medicine_name": exc.medicine_name,
+                "reasoning": exc.reasoning,
+                "target_user_id": user.id if user else None,
+                "target_user_name": user.name if user else None,
+                "target_user_email": user.email if user else None,
+                "target_user_role": user.role if user else None,
+            },
+        )
+        run_in_background(send_push_to_token, staff.push_token, title, body, staff.id)
+
+    # Admin trace for every escalation level so observability is complete.
+    admins = db.query(User).filter(User.role == "admin").all()
+    trace_title = "Exception Agent Trace"
+    trace_body = f"{exc.exception_type} classified as {exc.escalation_level} for {exc.medicine_name}"
+    for admin in admins:
+        create_notification(
+            db,
+            admin.id,
+            NotificationType.safety,
+            trace_title,
+            trace_body,
+            has_action=True,
+            dedupe_window_minutes=0,
+            metadata={
+                "agent_name": "exception_agent",
+                "phase": "exception_trace",
+                "exception_type": exc.exception_type,
+                "escalation_level": exc.escalation_level,
+                "severity": exc.severity,
+                "medicine_id": exc.medicine_id,
+                "medicine_name": exc.medicine_name,
+                "reasoning": exc.reasoning,
+                "target_user_id": user.id if user else None,
+                "target_user_name": user.name if user else None,
+                "target_user_email": user.email if user else None,
+                "target_user_role": user.role if user else None,
+            },
+        )
+
+    # Also notify patient
+    if user and exc.patient_action:
+        create_notification(
+            db, user.id, NotificationType.safety,
+            f"Exception Agent Alert: {exc.medicine_name}",
+            exc.patient_action,
+            has_action=True, dedupe_window_minutes=30,
+            metadata={
+                "agent_name": "exception_agent",
+                "phase": "patient_alert",
                 "exception_type": exc.exception_type,
                 "escalation_level": exc.escalation_level,
                 "severity": exc.severity,
@@ -489,17 +544,7 @@ def _escalate(db: Session, user: User | None, exc: ExceptionCase):
                 "reasoning": exc.reasoning,
             },
         )
-        run_in_background(send_push_to_token, staff.push_token, title, body, staff.id)
-
-    # Also notify patient
-    if user and exc.patient_action:
-        create_notification(
-            db, user.id, NotificationType.safety,
-            f"Order Alert: {exc.medicine_name}",
-            exc.patient_action,
-            has_action=True, dedupe_window_minutes=30,
-        )
-        run_in_background(send_push_to_token, user.push_token, f"Order Alert: {exc.medicine_name}", exc.patient_action, user.id)
+        run_in_background(send_push_to_token, user.push_token, f"Exception Agent Alert: {exc.medicine_name}", exc.patient_action, user.id)
 
     # Webhook for external systems
     dispatch_webhook(db, event_type="exception_escalated", payload={

@@ -13,6 +13,7 @@ from database import get_db
 from dependencies import get_current_user
 from models.notification import NotificationType
 from models.user import User
+from exception_agent.exception_agent import handle_order_exceptions
 from order_agent.order_agent import place_order
 from saftery_policies_agents.graph import process_with_safety
 from schedular_agent.schedular_agent import route_order_to_pharmacy
@@ -132,6 +133,11 @@ def execute_full_pipeline(
     )
 
     if safety.get("has_blocks"):
+        exception_result = handle_order_exceptions(
+            user_id=current_user.id,
+            safety_results=safety.get("safety_results", []) or [],
+            matched_medicines=items_dicts,
+        )
         _publish_agent_trace(
             db,
             actor=current_user,
@@ -148,7 +154,37 @@ def execute_full_pipeline(
             "blocked": True,
             "safety_summary": safety.get("safety_summary", ""),
             "safety_results": safety.get("safety_results", []),
+            "exception_result": exception_result,
         }
+    if safety.get("has_warnings"):
+        exception_result = handle_order_exceptions(
+            user_id=current_user.id,
+            safety_results=safety.get("safety_results", []) or [],
+            matched_medicines=items_dicts,
+        )
+        escalation_summary = exception_result.get("escalation_summary", {}) if isinstance(exception_result, dict) else {}
+        l2 = int(escalation_summary.get("L2_pharmacist", 0) or 0)
+        l3 = int(escalation_summary.get("L3_admin", 0) or 0)
+        l4 = int(escalation_summary.get("L4_hard_block", 0) or 0)
+        if (l2 + l3 + l4) > 0:
+            _publish_agent_trace(
+                db,
+                actor=current_user,
+                target_user_id=current_user.id,
+                agent_name="order_agent",
+                phase="order_agent_held_by_exception",
+                title="Order Agent Trace",
+                body="Order agent execution held by exception agent review requirements.",
+                payload={"source": source, "exception_result": exception_result},
+            )
+            return {
+                "success": False,
+                "stage": "exception_agent",
+                "blocked": True,
+                "safety_summary": safety.get("safety_summary", ""),
+                "safety_results": safety.get("safety_results", []),
+                "exception_result": exception_result,
+            }
 
     # STEP 2: Scheduler picks pharmacy
     scheduler = route_order_to_pharmacy(

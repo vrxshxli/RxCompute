@@ -45,7 +45,14 @@ export function NotificationProvider({ children }) {
         if (window.speechSynthesis && safetyNote) {
           window.speechSynthesis.cancel();
           const text = `${safetyNote.title || ""} ${safetyNote.body || ""}`.toLowerCase();
-          const prefix = text.includes("scheduler") ? "Scheduler agent alert." : "Safety alert.";
+            const prefix =
+              text.includes("exception agent") || text.includes("exception")
+                ? "Exception agent alert."
+                : text.includes("demand forecast agent") || text.includes("demand forecast")
+                  ? "Demand forecast agent alert."
+                  : text.includes("scheduler")
+                    ? "Scheduler agent alert."
+                    : "Safety alert.";
           const msg = new SpeechSynthesisUtterance(`${prefix} ${safetyNote.title || ""}. ${safetyNote.body || ""}`);
           msg.rate = 0.95;
           msg.pitch = 1.0;

@@ -23,6 +23,7 @@ from models.notification import NotificationType
 from models.order import Order, OrderItem, OrderStatus
 from models.user import User
 from models.user_medication import UserMedication
+from exception_agent.exception_agent import handle_order_exceptions
 from saftery_policies_agents.graph import process_with_safety
 from schedular_agent.schedular_agent import route_order_to_pharmacy
 from prediction_agent.prediction_agent import (
@@ -389,6 +390,11 @@ def confirm_refill_and_create_order(
         user_message=f"Prediction refill confirmation via {req.confirmation_source}",
     )
     if safety.get("has_blocks"):
+        exception_result = handle_order_exceptions(
+            user_id=target_user_id,
+            safety_results=safety.get("safety_results", []) or [],
+            matched_medicines=safety_payload,
+        )
         reason = (safety.get("safety_summary") or "Refill blocked by safety checks").strip()
         _publish_prediction_order_trace(
             db,
@@ -405,7 +411,33 @@ def confirm_refill_and_create_order(
             },
             f"Prediction refill blocked for {med.name}: {reason}",
         )
-        raise HTTPException(status_code=400, detail={"message": reason, "safety_results": safety.get("safety_results", [])})
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": reason,
+                "safety_results": safety.get("safety_results", []),
+                "exception_result": exception_result,
+            },
+        )
+    if safety.get("has_warnings"):
+        exception_result = handle_order_exceptions(
+            user_id=target_user_id,
+            safety_results=safety.get("safety_results", []) or [],
+            matched_medicines=safety_payload,
+        )
+        escalation_summary = exception_result.get("escalation_summary", {}) if isinstance(exception_result, dict) else {}
+        l2 = int(escalation_summary.get("L2_pharmacist", 0) or 0)
+        l3 = int(escalation_summary.get("L3_admin", 0) or 0)
+        l4 = int(escalation_summary.get("L4_hard_block", 0) or 0)
+        if (l2 + l3 + l4) > 0:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message": "Refill requires manual exception review",
+                    "safety_results": safety.get("safety_results", []),
+                    "exception_result": exception_result,
+                },
+            )
 
     # Prevent duplicate refill orders for the same medicine while one is already active.
     existing = _find_active_refill_order(db, target_user_id, med.id)

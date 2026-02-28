@@ -5,13 +5,16 @@ Exception Agent API — Escalation Handler
   POST /exceptions/resolve     → Mark exception as resolved (pharmacist/admin action)
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+import json
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from database import get_db
 from dependencies import get_current_user
 from models.user import User
+from models.notification import Notification, NotificationType
 from exception_agent.exception_agent import handle_order_exceptions
 
 router = APIRouter(prefix="/exceptions", tags=["Exception Agent"])
@@ -78,26 +81,38 @@ def resolve_exception(
     if current_user.role not in STAFF:
         raise HTTPException(403, "Staff only")
 
-    from models.notification import NotificationType
     from services.notifications import create_notification
 
-    # Find patient who ordered this medicine (from recent safety notifications)
-    from models.notification import Notification
+    # Find most recent matching exception notification via metadata.
     notif = (
         db.query(Notification)
         .filter(
             Notification.type == NotificationType.safety,
-            Notification.title.contains(str(medicine_id)),
+            Notification.metadata_json.isnot(None),
         )
         .order_by(Notification.created_at.desc())
-        .first()
+        .all()
     )
+    matched_notif = None
+    target_user_id = None
+    for n in notif:
+        try:
+            meta = json.loads(n.metadata_json or "{}")
+        except Exception:
+            meta = {}
+        if str(meta.get("agent_name", "")).strip().lower() != "exception_agent":
+            continue
+        if int(meta.get("medicine_id") or 0) != medicine_id:
+            continue
+        matched_notif = n
+        target_user_id = int(meta.get("target_user_id") or 0) or None
+        break
 
     resolution_msg = f"Exception for medicine #{medicine_id}: {action}. {notes}".strip()
 
-    if notif:
+    if target_user_id:
         create_notification(
-            db, notif.user_id, NotificationType.order,
+            db, target_user_id, NotificationType.order,
             f"Exception Resolved",
             resolution_msg,
             has_action=True,
@@ -120,3 +135,52 @@ def resolve_exception(
         "resolved_by_role": current_user.role,
         "notes": notes,
     }
+
+
+@router.get("/queue")
+def exception_queue(
+    limit: int = Query(default=100, ge=1, le=300),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Pharmacy/admin exception queue derived from exception-agent safety notifications.
+    """
+    if current_user.role not in {"admin", "pharmacy_store"}:
+        raise HTTPException(status_code=403, detail="Staff only")
+    rows = (
+        db.query(Notification)
+        .filter(
+            Notification.type == NotificationType.safety,
+            Notification.metadata_json.isnot(None),
+        )
+        .order_by(Notification.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    out = []
+    for n in rows:
+        try:
+            meta = json.loads(n.metadata_json or "{}")
+        except Exception:
+            meta = {}
+        if str(meta.get("agent_name", "")).strip().lower() != "exception_agent":
+            continue
+        out.append(
+            {
+                "id": n.id,
+                "title": n.title,
+                "body": n.body,
+                "created_at": n.created_at,
+                "is_read": n.is_read,
+                "exception_type": meta.get("exception_type"),
+                "escalation_level": meta.get("escalation_level"),
+                "severity": meta.get("severity"),
+                "medicine_id": meta.get("medicine_id"),
+                "medicine_name": meta.get("medicine_name"),
+                "reasoning": meta.get("reasoning"),
+                "target_user_id": meta.get("target_user_id"),
+                "target_user_name": meta.get("target_user_name"),
+            }
+        )
+    return out

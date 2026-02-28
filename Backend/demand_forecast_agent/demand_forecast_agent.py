@@ -34,9 +34,12 @@ from sqlalchemy import func as sqlfunc
 
 from database import SessionLocal
 from models.medicine import Medicine
+from models.notification import NotificationType
 from models.order import Order, OrderItem, OrderStatus
+from models.user import User
 from models.warehouse import WarehouseStock, PharmacyStock
 from models.pharmacy_store import PharmacyStore
+from services.notifications import create_notification, run_in_background, send_push_to_token
 
 
 # ━━━ CONFIG ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -158,6 +161,7 @@ def run_demand_forecast(forecast_days: int = FORECAST_DAYS_DEFAULT) -> dict:
     db = SessionLocal()
     try:
         result = _forecast_all(db, forecast_days)
+        _publish_demand_forecast_alerts(db, result, forecast_days)
     finally:
         db.close()
     result.execution_time_ms = int((time.time() - t0) * 1000)
@@ -165,6 +169,76 @@ def run_demand_forecast(forecast_days: int = FORECAST_DAYS_DEFAULT) -> dict:
     _out({"medicines": result.total_medicines, "critical": result.critical_count,
           "high": result.high_count, "time_ms": result.execution_time_ms})
     return result.to_dict()
+
+
+def _publish_demand_forecast_alerts(db: Session, result: ForecastResult, forecast_days: int) -> None:
+    """
+    Emit demand-forecast agent traces/alerts for admin and pharmacy dashboards.
+    """
+    admins = db.query(User).filter(User.role == "admin").all()
+    pharmacists = db.query(User).filter(User.role == "pharmacy_store").all()
+    critical_or_high = result.critical_count + result.high_count
+    trace_title = "Demand Forecast Agent Trace"
+    trace_body = (
+        f"Forecast completed: {result.total_medicines} medicines, "
+        f"critical={result.critical_count}, high={result.high_count}, days={forecast_days}."
+    )
+    trace_meta = {
+        "agent_name": "demand_forecast_agent",
+        "phase": "demand_forecast_full_scan",
+        "forecast_days": forecast_days,
+        "total_medicines": result.total_medicines,
+        "critical": result.critical_count,
+        "high": result.high_count,
+        "medium": result.medium_count,
+        "low": result.low_count,
+        "safe": result.safe_count,
+        "reorder_alerts": result.reorder_alerts[:15],
+    }
+    for admin in admins:
+        create_notification(
+            db,
+            admin.id,
+            NotificationType.safety,
+            trace_title,
+            trace_body,
+            has_action=True,
+            dedupe_window_minutes=10,
+            metadata=trace_meta,
+        )
+        run_in_background(send_push_to_token, admin.push_token, trace_title, trace_body, admin.id)
+
+    if critical_or_high <= 0:
+        db.commit()
+        return
+
+    alert_title = "Demand Forecast Agent Alert"
+    top_names = ", ".join([x.get("name", "-") for x in result.reorder_alerts[:3]]) if result.reorder_alerts else "No medicines"
+    alert_body = (
+        f"{critical_or_high} medicines need urgent reorder. Top risk: {top_names}. "
+        f"Check demand forecast dashboard."
+    )
+    alert_meta = {
+        "agent_name": "demand_forecast_agent",
+        "phase": "demand_forecast_reorder_alert",
+        "forecast_days": forecast_days,
+        "critical": result.critical_count,
+        "high": result.high_count,
+        "reorder_alerts": result.reorder_alerts[:20],
+    }
+    for u in admins + pharmacists:
+        create_notification(
+            db,
+            u.id,
+            NotificationType.safety,
+            alert_title,
+            alert_body,
+            has_action=True,
+            dedupe_window_minutes=10,
+            metadata=alert_meta,
+        )
+        run_in_background(send_push_to_token, u.push_token, alert_title, alert_body, u.id)
+    db.commit()
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

@@ -4,48 +4,49 @@ import { StatusPill, Btn, PageHeader } from '../../components/shared';
 import { useAuth } from '../../context/AuthContext';
 export default function PharmacyExceptions() {
   const { token, apiBase } = useAuth();
-  const [orders, setOrders] = useState([]);
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(false);
   useEffect(() => {
     if (!token) return;
     const load = async () => {
+      setLoading(true);
       try {
-        const res = await fetch(`${apiBase}/orders/`, {
+        const res = await fetch(`${apiBase}/exceptions/queue?limit=120`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (!res.ok) return;
         const data = await res.json();
-        setOrders(Array.isArray(data) ? data : []);
+        setRows(Array.isArray(data) ? data : []);
       } catch (_) {}
+      finally { setLoading(false); }
     };
     load();
   }, [token, apiBase]);
-  const exceptions = useMemo(
-    () =>
-      orders
-        .filter((o) => o.status === "pending")
-        .flatMap((o) =>
-          (o.items || [])
-            .filter((it) => !!it.rx_required || (it.quantity || 0) > 5)
-            .map((it) => ({
-              t: it.rx_required ? "Prescription Required" : "High Quantity",
-              o: o.order_uid,
-              m: `${it.name} x${it.quantity}`,
-              p: `User #${o.user_id}`,
-              s: it.rx_required ? "high" : "medium",
-            })),
-        )
-        .slice(0, 20),
-    [orders],
-  );
+  const exceptions = useMemo(() => rows.slice(0, 80), [rows]);
+
+  const resolve = async (x, action) => {
+    if (!token || !x?.medicine_id) return;
+    try {
+      await fetch(`${apiBase}/exceptions/resolve/${x.medicine_id}?action=${encodeURIComponent(action)}&notes=${encodeURIComponent("Resolved from pharmacy dashboard")}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setRows((prev) => prev.filter((r) => r.id !== x.id));
+    } catch (_) {}
+  };
+
   return (<div><PageHeader title="Exceptions" subtitle="Manual review"/>
   <div style={{display:"flex",flexDirection:"column",gap:12}}>
+    {loading ? <div style={{fontSize:12,color:T.gray500}}>Loading exception queue...</div> : null}
     {exceptions.map((x,i)=>
-      <div key={i} style={{background:T.white,border:"1px solid "+T.gray200,borderLeft:"4px solid "+(x.s==="high"?T.red:T.yellow),borderRadius:10,padding:16}}>
-        <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}><span style={{fontWeight:600,color:T.gray900}}>{x.t}</span><StatusPill status={x.s} size="xs"/></div>
-        <div style={{fontSize:13,color:T.gray600,marginBottom:4}}>Order: <span style={{fontFamily:"monospace"}}>{x.o}</span></div>
-        <div style={{fontSize:13,color:T.gray600,marginBottom:4}}>{x.m} · {x.p}</div>
-        <div style={{display:"flex",gap:8,marginTop:8}}><Btn variant="primary" size="sm">Resolve</Btn><Btn variant="secondary" size="sm">Escalate</Btn></div>
+      <div key={i} style={{background:T.white,border:"1px solid "+T.gray200,borderLeft:"4px solid "+((String(x.severity||"").toLowerCase()==="critical" || String(x.severity||"").toLowerCase()==="high")?T.red:T.yellow),borderRadius:10,padding:16}}>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}><span style={{fontWeight:600,color:T.gray900}}>{x.exception_type || "Exception"}</span><StatusPill status={(x.severity||"medium").toLowerCase()} size="xs"/></div>
+        <div style={{fontSize:13,color:T.gray600,marginBottom:4}}>Medicine: <span style={{fontFamily:"monospace"}}>{x.medicine_name || "-"}</span></div>
+        <div style={{fontSize:13,color:T.gray600,marginBottom:4}}>Level: {x.escalation_level || "-"} · Patient: {x.target_user_name || (x.target_user_id ? `User #${x.target_user_id}` : "-")}</div>
+        <div style={{fontSize:12,color:T.gray500,marginBottom:4}}>{x.reasoning || x.body}</div>
+        <div style={{display:"flex",gap:8,marginTop:8}}><Btn variant="primary" size="sm" onClick={()=>resolve(x,"approved")}>Resolve</Btn><Btn variant="secondary" size="sm" onClick={()=>resolve(x,"alternative_offered")}>Alternative</Btn></div>
       </div>
     )}
+    {exceptions.length===0 ? <div style={{fontSize:12,color:T.gray500}}>No active exception-agent items.</div> : null}
   </div></div>);
 }

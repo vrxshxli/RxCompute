@@ -16,6 +16,7 @@ from models.pharmacy_store import PharmacyStore
 from models.notification import NotificationType
 from models.user_medication import UserMedication
 from schemas.order import OrderCreate, OrderOut, OrderStatusUpdate
+from exception_agent.exception_agent import handle_order_exceptions
 from saftery_policies_agents.graph import process_with_safety
 from services.notifications import (
     create_notification,
@@ -494,6 +495,11 @@ def create_order(
     )
     safety_summary = (safety.get("safety_summary") or "").strip()
     if safety.get("has_blocks"):
+        exception_result = handle_order_exceptions(
+            user_id=current_user.id,
+            safety_results=safety.get("safety_results", []) or [],
+            matched_medicines=safety_payload,
+        )
         title = "Safety Alert: Order Blocked"
         body = safety_summary or "Order blocked by safety policy checks."
         _broadcast_safety_alert(db, title, body, current_user)
@@ -504,9 +510,30 @@ def create_order(
                 "message": "Order blocked by safety policy",
                 "safety_summary": body,
                 "safety_results": safety.get("safety_results", []),
+                "exception_result": exception_result,
             },
         )
     if safety.get("has_warnings"):
+        exception_result = handle_order_exceptions(
+            user_id=current_user.id,
+            safety_results=safety.get("safety_results", []) or [],
+            matched_medicines=safety_payload,
+        )
+        # Hold orders that need pharmacist/admin review.
+        escalation_summary = exception_result.get("escalation_summary", {}) if isinstance(exception_result, dict) else {}
+        l2 = int(escalation_summary.get("L2_pharmacist", 0) or 0)
+        l3 = int(escalation_summary.get("L3_admin", 0) or 0)
+        l4 = int(escalation_summary.get("L4_hard_block", 0) or 0)
+        if (l2 + l3 + l4) > 0:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message": "Order requires manual exception review",
+                    "safety_summary": safety_summary or "Order held by exception agent",
+                    "safety_results": safety.get("safety_results", []),
+                    "exception_result": exception_result,
+                },
+            )
         title = "Safety Warning: Review Needed"
         body = safety_summary or "Order has safety warnings. Pharmacist review recommended."
         _broadcast_safety_alert(db, title, body, current_user)
@@ -651,6 +678,7 @@ def update_order_status(
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
     old_status = order.status.value if hasattr(order.status, "value") else str(order.status)
+    is_refill_order = (order.order_uid or "").upper().startswith("RFL-")
     try:
         new_status = OrderStatus(data.status)
     except ValueError:
@@ -706,6 +734,7 @@ def update_order_status(
                 new_status = OrderStatus.cancelled
     elif current_user.role == "admin":
         allowed_for_admin = {
+            OrderStatus.verified,
             OrderStatus.picking,
             OrderStatus.packed,
             OrderStatus.dispatched,
@@ -715,18 +744,26 @@ def update_order_status(
         if new_status not in allowed_for_admin:
             raise HTTPException(status_code=403, detail="Admin can update only logistics statuses")
         if new_status in {OrderStatus.picking, OrderStatus.packed, OrderStatus.dispatched, OrderStatus.delivered}:
-            if old_status not in {
-                OrderStatus.verified.value,
-                OrderStatus.picking.value,
-                OrderStatus.packed.value,
-                OrderStatus.dispatched.value,
-            }:
+            if not (
+                old_status in {
+                    OrderStatus.verified.value,
+                    OrderStatus.picking.value,
+                    OrderStatus.packed.value,
+                    OrderStatus.dispatched.value,
+                }
+                # Refill orders are auto-confirmed by user consent + prediction safety gate.
+                # Allow admin to progress logistics directly from pending.
+                or (is_refill_order and old_status == OrderStatus.pending.value)
+            ):
                 raise HTTPException(status_code=400, detail="Order must be pharmacy-approved first")
     else:
         raise HTTPException(status_code=403, detail="Role cannot update order status")
 
     # On first approval (pending -> confirmed/verified), reserve stock from inventory.
-    if old_status == OrderStatus.pending.value and new_status in {OrderStatus.confirmed, OrderStatus.verified}:
+    if old_status == OrderStatus.pending.value and (
+        new_status in {OrderStatus.confirmed, OrderStatus.verified}
+        or (is_refill_order and current_user.role == "admin" and new_status in {OrderStatus.picking, OrderStatus.packed, OrderStatus.dispatched, OrderStatus.delivered})
+    ):
         med_ids = [it.medicine_id for it in order.items]
         med_rows = db.query(Medicine).filter(Medicine.id.in_(med_ids)).all()
         med_map = {m.id: m for m in med_rows}
