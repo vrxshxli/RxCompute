@@ -21,6 +21,7 @@ import 'features/profile/bloc/profile_bloc.dart';
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
   debugPrint('📩 Background message: ${message.messageId}');
+  await LocalNotificationService.showFromRemoteMessage(message);
 }
 
 void main() async {

@@ -58,6 +58,7 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
   final Map<String, DateTime> _speakDedupe = <String, DateTime>{};
   bool _refillPromptInProgress = false;
   DateTime? _lastHomeRefreshFromNotif;
+  bool _autoVoiceStartQueued = false;
 
   @override
   void initState() {
@@ -107,10 +108,32 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
         _pollAndSpeakNotifications(forceSpeakRefillOnOpen: true);
         context.read<HomeBloc>().add(LoadHomeDataEvent());
         _maybePromptRefillConfirmation(trigger: 'notification_tap');
+        _queueAutoVoiceStart();
       });
+      final initialMessage = await messaging.getInitialMessage();
+      if (initialMessage != null) {
+        if (mounted) {
+          setState(() => _i = 0);
+        }
+        _pollAndSpeakNotifications(forceSpeakRefillOnOpen: true);
+        _maybePromptRefillConfirmation(trigger: 'terminated_notification_tap');
+        _queueAutoVoiceStart();
+      }
     } catch (e) {
       debugPrint('⚠️ Push init failed: $e');
     }
+  }
+
+  void _queueAutoVoiceStart() {
+    if (_autoVoiceStartQueued) return;
+    _autoVoiceStartQueued = true;
+    Future.delayed(const Duration(milliseconds: 1100), () async {
+      if (!mounted) return;
+      _autoVoiceStartQueued = false;
+      if (!_isListening) {
+        await _toggleListening();
+      }
+    });
   }
 
   @override
@@ -422,8 +445,8 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
 
     if (says(['help', 'madad', 'सहायता'])) {
       await _speak(_voiceLanguage == 'hi-IN'
-          ? 'आप बोल सकते हैं: ओपन होम, ओपन चैट, ओपन मेड्स, ओपन प्रोफाइल, सेफ्टी चेक फॉर पैरासिटामोल क्वांटिटी 2, रीफिल कन्फर्म ओमेगा 3 क्वांटिटी 2, या रीड लेटेस्ट सेफ्टी अलर्ट।'
-          : 'You can say: open home, open chat, open meds, open profile, check safety for paracetamol quantity 2, confirm refill omega 3 quantity 2, or read latest safety alert.');
+          ? 'आप बोल सकते हैं: ओपन होम, ओपन चैट, ऑर्डर ओमेगा थ्री क्वांटिटी 2, सेफ्टी चेक फॉर पैरासिटामोल क्वांटिटी 2, रीफिल कन्फर्म ओमेगा 3 क्वांटिटी 2, या रीड लेटेस्ट सेफ्टी अलर्ट।'
+          : 'You can say: open home, open chat, order omega three quantity 2, check safety for paracetamol quantity 2, confirm refill omega 3 quantity 2, or read latest safety alert.');
       return;
     }
 
@@ -526,6 +549,56 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
         );
       } catch (_) {
         await _speak(_voiceLanguage == 'hi-IN' ? 'रीफिल कन्फर्म नहीं हो पाया।' : 'Refill confirmation failed.');
+      }
+      return;
+    }
+
+    if (says(['order ', 'place order', 'buy ', 'ऑर्डर ', 'order medicine'])) {
+      final qtyMatch = RegExp(r'(quantity|qty)\s+(\d+)').firstMatch(txt);
+      final qty = qtyMatch != null ? int.tryParse(qtyMatch.group(2) ?? '1') ?? 1 : 1;
+      final isCod = txt.contains('cod') || txt.contains('cash on delivery');
+      final payment = isCod ? 'cod' : 'online';
+      String medQuery = txt
+          .replaceAll(RegExp(r'place order|order medicine|order|buy|quantity\s+\d+|qty\s+\d+|cod|cash on delivery|online|payment'), ' ')
+          .replaceAll(RegExp(r'ऑर्डर|मेडिसिन|दवाई|क्वांटिटी'), ' ')
+          .replaceAll(RegExp(r'\s+'), ' ')
+          .trim();
+      if (medQuery.isEmpty) {
+        await _speak(_voiceLanguage == 'hi-IN' ? 'कृपया मेडिसिन का नाम बताइए।' : 'Please tell the medicine name.');
+        return;
+      }
+      try {
+        final meds = await _medicineRepository.getMedicines(search: medQuery);
+        if (meds.isEmpty) {
+          await _speak(_voiceLanguage == 'hi-IN' ? '$medQuery नहीं मिला।' : '$medQuery not found.');
+          return;
+        }
+        final med = meds.first;
+        final order = await _orderRepository.createOrderViaAgent(
+          items: [
+            {
+              'medicine_id': med.id,
+              'name': med.name,
+              'quantity': qty < 1 ? 1 : qty,
+              'price': med.price,
+              'strips_count': qty < 1 ? 1 : qty,
+              'dosage_instruction': 'As directed',
+            }
+          ],
+          paymentMethod: payment,
+          source: 'voice_conversational_agent',
+        );
+        await _speak(
+          _voiceLanguage == 'hi-IN'
+              ? 'ऑर्डर सफल हुआ। ऑर्डर आई डी ${order.orderUid}।'
+              : 'Order placed successfully. Order id ${order.orderUid}.',
+        );
+      } catch (e) {
+        await _speak(
+          _voiceLanguage == 'hi-IN'
+              ? 'वॉइस ऑर्डर अभी पूरा नहीं हो पाया। ${e.toString()}'
+              : 'Voice order failed. ${e.toString()}',
+        );
       }
       return;
     }
