@@ -38,4 +38,5 @@ class ApiConfig {
 
   // Chat
   static const String chatUploadPrescription = '/chat/upload-prescription';
+  static const String chatAssistant = '/chat/assistant';
 }

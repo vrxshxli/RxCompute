@@ -353,10 +353,80 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
 
   Future<List<ChatMessage>> _generateResponses(String text) async {
     await Future.delayed(const Duration(milliseconds: 700));
-    final l = text.toLowerCase().trim();
+    final aiAssist = await _tryAssistIntent(text);
+    final aiIntent = _stringOrNull(aiAssist['intent'])?.toLowerCase() ?? 'unknown';
+    final aiResponse = _stringOrNull(aiAssist['response_text']);
+    final aiMedicineQuery = _stringOrNull(aiAssist['medicine_query']);
+    final normalized = _stringOrNull(aiAssist['normalized_text']);
+    final l = (normalized ?? text).toLowerCase().trim();
     final now = DateTime.now();
 
-    if (_isCancelOrderCommand(l)) {
+    if (aiIntent == 'new_chat') {
+      _resetDraft();
+      return [
+        ChatMessage(
+          id: '${now.millisecondsSinceEpoch}',
+          isUser: false,
+          text: aiResponse ??
+              _t(
+                hi: 'नई conversation तैयार है. Ab medicine ka naam bhejo.',
+                en: 'A fresh conversation is ready. Please share the medicine name.',
+              ),
+          timestamp: now,
+        ),
+      ];
+    }
+
+    if (_isChatStopIntent(aiIntent, l)) {
+      _resetDraft();
+      return [
+        ChatMessage(
+          id: '${now.millisecondsSinceEpoch}',
+          isUser: false,
+          text: aiResponse ??
+              _t(
+                hi: 'ठीक है, chat stop kar di. Jab chaho "new chat" bolo aur fir se start karein.',
+                en: 'Okay, chat has been stopped. Say "new chat" anytime to start again.',
+              ),
+          timestamp: now,
+        ),
+      ];
+    }
+
+    if (_isChangeMedicineIntent(aiIntent, l)) {
+      _resetDraft();
+      final medQuery = (aiMedicineQuery != null && aiMedicineQuery.isNotEmpty) ? aiMedicineQuery : _extractMedicineQueryFromChangeRequest(text);
+      if (medQuery != null && medQuery.trim().isNotEmpty) {
+        final seed = [
+          ChatMessage(
+            id: '${now.millisecondsSinceEpoch}',
+            isUser: false,
+            text: aiResponse ??
+                _t(
+                  hi: 'ठीक है, medicine बदल देते हैं. New medicine dhundh raha hoon.',
+                  en: 'Sure, we can change the medicine. Let me find the new one.',
+                ),
+            timestamp: now,
+          ),
+        ];
+        final found = await _respondToMedicineQuery(medQuery.trim(), now.millisecondsSinceEpoch + 1);
+        return [...seed, ...found];
+      }
+      return [
+        ChatMessage(
+          id: '${now.millisecondsSinceEpoch}',
+          isUser: false,
+          text: aiResponse ??
+              _t(
+                hi: 'ज़रूर, medicine change kar sakte ho. Nayi medicine ka naam bolo.',
+                en: 'Sure, you can change medicine. Please share the new medicine name.',
+              ),
+          timestamp: now,
+        ),
+      ];
+    }
+
+    if (aiIntent == 'cancel_order' || _isCancelOrderCommand(l)) {
       if (_lastPlacedOrderId == null) {
         return [
           ChatMessage(
@@ -518,7 +588,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     }
 
     if (_stage == _ChatStage.strips && _draftMedicine != null) {
-      final strips = int.tryParse(l);
+      final strips = _extractQuantityFromText(l);
       if (strips == null || strips <= 0) {
         return [
           ChatMessage(
@@ -648,17 +718,47 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       ];
     }
 
-    final results = await _medicineRepo.getMedicines(search: text.trim());
-    _lastSearchQuery = text.trim();
+    if (aiIntent == 'unknown' && aiResponse != null && aiResponse.trim().isNotEmpty && text.trim().split(RegExp(r'\s+')).length >= 3) {
+      return [
+        ChatMessage(
+          id: '${now.millisecondsSinceEpoch}',
+          isUser: false,
+          text: aiResponse,
+          timestamp: now,
+        ),
+      ];
+    }
+
+    return _respondToMedicineQuery(text.trim(), now.millisecondsSinceEpoch);
+  }
+
+  Future<Map<String, dynamic>> _tryAssistIntent(String text) async {
+    try {
+      return await _chatRepo.assistMessage(
+        message: text,
+        languageCode: _lang.code,
+        stage: _stage.name,
+        currentMedicine: _draftMedicine?.name,
+        candidateMedicines: _candidateMedicines.map((m) => m.name).toList(),
+      );
+    } catch (_) {
+      return const <String, dynamic>{};
+    }
+  }
+
+  Future<List<ChatMessage>> _respondToMedicineQuery(String query, int idSeed) async {
+    final now = DateTime.now();
+    final results = await _medicineRepo.getMedicines(search: query);
+    _lastSearchQuery = query;
     if (results.isEmpty) {
-      final suggestions = _withPredictedRx(await _suggestMedicines(text.trim()));
+      final suggestions = _withPredictedRx(await _suggestMedicines(query));
       if (suggestions.isNotEmpty) {
         _candidateMedicines = suggestions;
         _stage = _ChatStage.selection;
         final names = suggestions.map((m) => m.name).join('\n- ');
         return [
           ChatMessage(
-            id: '${now.millisecondsSinceEpoch}',
+            id: '$idSeed',
             isUser: false,
             text: _t(
               hi: 'Exact medicine nahi mili. Kya aap inme se koi chahte ho?\n- $names',
@@ -672,7 +772,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       }
       return [
         ChatMessage(
-          id: '${now.millisecondsSinceEpoch}',
+          id: '$idSeed',
           isUser: false,
           text: _t(
             hi: 'Medicine nahi mili. Name ya PZN ke saath try karo.',
@@ -689,7 +789,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     _stage = _ChatStage.selection;
     return [
       ChatMessage(
-        id: '${now.millisecondsSinceEpoch}',
+        id: '$idSeed',
         isUser: false,
         text: _t(
           hi: 'Related medicines list ye hai. Neeche se correct medicine select karo.',
@@ -742,6 +842,95 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     _candidateMedicines = const [];
     _lastSearchQuery = null;
     _stage = _ChatStage.idle;
+  }
+
+  String? _stringOrNull(Object? value) {
+    if (value == null) return null;
+    final s = value.toString().trim();
+    if (s.isEmpty || s.toLowerCase() == 'null') return null;
+    return s;
+  }
+
+  bool _isChangeMedicineIntent(String aiIntent, String text) {
+    if (aiIntent == 'change_medicine') return true;
+    final t = text.trim();
+    return t.contains('change medicine') ||
+        t.contains('change the medicine') ||
+        t.contains('switch medicine') ||
+        t.contains('replace medicine') ||
+        t.contains('medicine badlo') ||
+        t.contains('दवा बदल') ||
+        t.contains('औषध बदल');
+  }
+
+  bool _isChatStopIntent(String aiIntent, String text) {
+    if (aiIntent == 'cancel_chat' || aiIntent == 'end_chat') return true;
+    final t = text.trim();
+    return t == 'cancel chat' ||
+        t == 'end chat' ||
+        t == 'stop chat' ||
+        t == 'finish chat' ||
+        t.contains('end conversation') ||
+        t.contains('chat बंद') ||
+        t.contains('चैट बंद');
+  }
+
+  String? _extractMedicineQueryFromChangeRequest(String raw) {
+    final lower = raw.toLowerCase();
+    final separators = [
+      'change medicine to',
+      'change to',
+      'switch to',
+      'replace with',
+      'दवा बदलकर',
+      'दवा बदल',
+      'औषध बदल',
+    ];
+    for (final marker in separators) {
+      final idx = lower.indexOf(marker);
+      if (idx == -1) continue;
+      final piece = raw.substring(idx + marker.length).trim();
+      final cleaned = piece.replaceAll(RegExp(r'^[\s:,-]+'), '').trim();
+      if (cleaned.isNotEmpty) return cleaned;
+    }
+    return null;
+  }
+
+  int? _extractQuantityFromText(String input) {
+    final direct = int.tryParse(input.trim());
+    if (direct != null) return direct;
+    final m = RegExp(r'\b(\d{1,3})\b').firstMatch(input);
+    if (m != null) return int.tryParse(m.group(1)!);
+    const map = <String, int>{
+      'one': 1,
+      'two': 2,
+      'three': 3,
+      'four': 4,
+      'five': 5,
+      'six': 6,
+      'seven': 7,
+      'eight': 8,
+      'nine': 9,
+      'ten': 10,
+      'ek': 1,
+      'do': 2,
+      'teen': 3,
+      'char': 4,
+      'chaar': 4,
+      'paanch': 5,
+      'saat': 7,
+      'aath': 8,
+      'nau': 9,
+      'दोन': 2,
+      'तीन': 3,
+      'चार': 4,
+      'पाच': 5,
+    };
+    final l = input.toLowerCase();
+    for (final e in map.entries) {
+      if (l.contains(e.key)) return e.value;
+    }
+    return null;
   }
 
   String _t({required String hi, required String en}) => _lang == _ChatLang.hi ? hi : en;
@@ -992,8 +1181,13 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     return t == 'new chat' ||
         t == 'start new chat' ||
         t == 'clear chat' ||
+        t == 'cancel chat' ||
+        t == 'end chat' ||
+        t == 'stop chat' ||
+        t == 'finish chat' ||
         t.contains('नई चैट') ||
         t.contains('नया चैट') ||
+        t.contains('चैट बंद') ||
         t.contains('new conversation');
   }
 
