@@ -9,6 +9,7 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/rx_theme_ext.dart';
 import '../../../core/services/local_notification_service.dart';
@@ -65,6 +66,9 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
   String _lastSpokenText = '';
   DateTime? _lastSpokenAt;
   bool _tuneUnavailable = false;
+  Set<String> _supportedSpeechLocales = <String>{};
+  String _pendingVoiceTranscript = '';
+  String _lastHandledVoiceTranscript = '';
 
   @override
   void initState() {
@@ -437,7 +441,28 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
 
   Future<void> _initVoiceAssistant() async {
     try {
-      _speechReady = await _speech.initialize();
+      final mic = await Permission.microphone.request();
+      if (!mic.isGranted) {
+        _speechReady = false;
+      } else {
+        _speechReady = await _speech.initialize(
+          onStatus: (status) {
+            if ((status == 'done' || status == 'notListening') && mounted && _isListening) {
+              setState(() => _isListening = false);
+              _flushPendingVoiceCommand();
+            }
+          },
+          onError: (_) {
+            if (mounted && _isListening) setState(() => _isListening = false);
+          },
+        );
+      }
+      if (_speechReady) {
+        try {
+          final locales = await _speech.locales();
+          _supportedSpeechLocales = locales.map((e) => e.localeId).toSet();
+        } catch (_) {}
+      }
       await _tts.setLanguage(_voiceLanguage);
       await _tts.setSpeechRate(0.45);
     } catch (_) {
@@ -448,11 +473,41 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
   Future<bool> _ensureSpeechReady() async {
     if (_speechReady) return true;
     try {
-      _speechReady = await _speech.initialize();
+      final mic = await Permission.microphone.request();
+      if (!mic.isGranted) {
+        _speechReady = false;
+        return false;
+      }
+      _speechReady = await _speech.initialize(
+        onStatus: (status) {
+          if ((status == 'done' || status == 'notListening') && mounted && _isListening) {
+            setState(() => _isListening = false);
+            _flushPendingVoiceCommand();
+          }
+        },
+        onError: (_) {
+          if (mounted && _isListening) setState(() => _isListening = false);
+        },
+      );
+      if (_speechReady) {
+        try {
+          final locales = await _speech.locales();
+          _supportedSpeechLocales = locales.map((e) => e.localeId).toSet();
+        } catch (_) {}
+      }
     } catch (_) {
       _speechReady = false;
     }
     return _speechReady;
+  }
+
+  String _bestSpeechLocale() {
+    if (_supportedSpeechLocales.isEmpty || _supportedSpeechLocales.contains(_speechLocale)) {
+      return _speechLocale;
+    }
+    if (_supportedSpeechLocales.contains('en_IN')) return 'en_IN';
+    if (_supportedSpeechLocales.contains('en_US')) return 'en_US';
+    return _supportedSpeechLocales.first;
   }
 
   Future<void> _startListeningWithRetry({bool fromAutoTrigger = false}) async {
@@ -481,16 +536,33 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
       return;
     }
     try {
+      try {
+        await _tts.stop();
+      } catch (_) {}
+      _pendingVoiceTranscript = '';
+      try {
+        await _speech.cancel();
+      } catch (_) {}
       await _speech.listen(
-        localeId: _speechLocale,
+        localeId: _bestSpeechLocale(),
         onResult: (result) async {
+          _pendingVoiceTranscript = result.recognizedWords;
+          if (mounted) {
+            setState(() => _lastHeard = result.recognizedWords);
+          }
           if (result.finalResult) {
             if (mounted) setState(() => _isListening = false);
-            await _handleVoiceCommand(result.recognizedWords);
+            final finalTxt = result.recognizedWords.trim();
+            if (finalTxt.isNotEmpty) {
+              _lastHandledVoiceTranscript = finalTxt.toLowerCase();
+              await _handleVoiceCommand(finalTxt);
+            }
           }
         },
         listenFor: const Duration(seconds: 14),
         pauseFor: const Duration(seconds: 4),
+        partialResults: true,
+        listenMode: stt.ListenMode.dictation,
       );
       if (mounted) setState(() => _isListening = true);
     } catch (_) {
@@ -773,6 +845,18 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
     out = out.replaceAll('vitamin d 3', 'vitamin d3');
     out = out.replaceAll(RegExp(r'\s+'), ' ').trim();
     return out;
+  }
+
+  Future<void> _flushPendingVoiceCommand() async {
+    final txt = _pendingVoiceTranscript.trim();
+    if (txt.isEmpty) return;
+    final norm = txt.toLowerCase();
+    if (norm == _lastHandledVoiceTranscript) return;
+    _lastHandledVoiceTranscript = norm;
+    if (mounted) {
+      setState(() => _lastHeard = txt);
+    }
+    await _handleVoiceCommand(txt);
   }
 
   @override

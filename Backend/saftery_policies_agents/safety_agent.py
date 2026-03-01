@@ -97,10 +97,21 @@ def run_safety_agent(state: AgentState) -> dict:
             "safety_summary": "No medicines to check.",
         }
 
+    # Parse optional ignore_order_id hints from user_message context.
+    user_msg = state.get("user_message", "")
+    ignore_order_ids = _extract_ignore_order_ids(user_msg)
+    current_order_id = _extract_current_order_id(user_msg)
+
     # ── Load from DB + check rules ──────────────────────
     db = SessionLocal()
     try:
-        results = _load_and_check_all(db, state.get("user_id", 0), matched)
+        results = _load_and_check_all(
+            db,
+            state.get("user_id", 0),
+            matched,
+            ignore_order_ids=ignore_order_ids,
+            current_order_id=current_order_id,
+        )
     finally:
         db.close()
 
@@ -148,7 +159,13 @@ def run_safety_agent(state: AgentState) -> dict:
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 @observe(name="safety_load_medicines")
-def _load_and_check_all(db, user_id: int, matched: list[dict]) -> list[SafetyCheckResult]:
+def _load_and_check_all(
+    db,
+    user_id: int,
+    matched: list[dict],
+    ignore_order_ids: set[int] | None = None,
+    current_order_id: int | None = None,
+) -> list[SafetyCheckResult]:
     """
     Single DB query to load all medicines, then check each.
     This is a separate Langfuse span so judges can see DB access time.
@@ -200,6 +217,8 @@ def _load_and_check_all(db, user_id: int, matched: list[dict]) -> list[SafetyChe
         result = _evaluate_rules(
             db=db,
             user_id=user_id,
+            ignore_order_ids=ignore_order_ids,
+            current_order_id=current_order_id,
             med=med,
             qty=qty,
             strips_count=strips_count,
@@ -226,6 +245,8 @@ def _load_and_check_all(db, user_id: int, matched: list[dict]) -> list[SafetyChe
 def _evaluate_rules(
     db,
     user_id: int,
+    ignore_order_ids: set[int] | None,
+    current_order_id: int | None,
     med: Medicine,
     qty: int,
     strips_count: int | None,
@@ -281,7 +302,13 @@ def _evaluate_rules(
             )
 
     # RULE 0b: Same medicine already has active in-flight order.
-    inflight = _has_active_inflight_order_for_medicine(db, user_id, med.id)
+    inflight = _has_active_inflight_order_for_medicine(
+        db,
+        user_id,
+        med.id,
+        ignore_order_ids=ignore_order_ids,
+        current_order_id=current_order_id,
+    )
     if inflight:
         reasoning = (
             f"Duplicate in-flight order blocked for user_id={user_id}, medicine='{name}'. "
@@ -1001,7 +1028,13 @@ def _active_days_remaining_for_user_medication(db, user_id: int, medicine_id: in
     return int(ceil(remaining_units / freq))
 
 
-def _has_active_inflight_order_for_medicine(db, user_id: int, medicine_id: int) -> Order | None:
+def _has_active_inflight_order_for_medicine(
+    db,
+    user_id: int,
+    medicine_id: int,
+    ignore_order_ids: set[int] | None = None,
+    current_order_id: int | None = None,
+) -> Order | None:
     if not user_id or not medicine_id:
         return None
     active_statuses = [
@@ -1012,7 +1045,7 @@ def _has_active_inflight_order_for_medicine(db, user_id: int, medicine_id: int) 
         OrderStatus.packed,
         OrderStatus.dispatched,
     ]
-    return (
+    q = (
         db.query(Order)
         .join(OrderItem, OrderItem.order_id == Order.id)
         .filter(
@@ -1020,9 +1053,35 @@ def _has_active_inflight_order_for_medicine(db, user_id: int, medicine_id: int) 
             OrderItem.medicine_id == medicine_id,
             Order.status.in_(active_statuses),
         )
-        .order_by(Order.created_at.desc())
-        .first()
     )
+    if ignore_order_ids:
+        q = q.filter(~Order.id.in_(list(ignore_order_ids)))
+    if isinstance(current_order_id, int) and current_order_id > 0:
+        # During pharmacy review, compare against already-existing older orders only.
+        q = q.filter(Order.id < current_order_id)
+    return q.order_by(Order.created_at.desc()).first()
+
+
+def _extract_ignore_order_ids(user_message: str | None) -> set[int]:
+    txt = str(user_message or "")
+    out: set[int] = set()
+    for m in re.finditer(r"ignore_order_id\s*=\s*(\d+)", txt):
+        try:
+            out.add(int(m.group(1)))
+        except Exception:
+            continue
+    return out
+
+
+def _extract_current_order_id(user_message: str | None) -> int | None:
+    txt = str(user_message or "")
+    m = re.search(r"current_order_id\s*=\s*(\d+)", txt)
+    if not m:
+        return None
+    try:
+        return int(m.group(1))
+    except Exception:
+        return None
 
 
 def _estimated_days_remaining_from_latest_delivery_history(

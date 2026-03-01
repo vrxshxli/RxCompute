@@ -304,6 +304,15 @@ def _auto_review_pending_for_pharmacy(db: Session, pharmacy_user: User) -> None:
         .all()
     )
     if not pending_orders:
+        # Fallback for misconfigured pharmacy-node mappings: review global pending queue.
+        pending_orders = (
+            db.query(Order)
+            .filter(Order.status == OrderStatus.pending)
+            .order_by(Order.created_at.asc())
+            .limit(100)
+            .all()
+        )
+    if not pending_orders:
         return
     changed = False
     for order in pending_orders:
@@ -321,7 +330,10 @@ def _auto_review_pending_for_pharmacy(db: Session, pharmacy_user: User) -> None:
         safety = process_with_safety(
             user_id=order.user_id,
             matched_medicines=payload,
-            user_message="Pharmacy auto-review pending order",
+            user_message=(
+                f"Pharmacy auto-review pending order "
+                f"ignore_order_id={order.id} current_order_id={order.id}"
+            ),
         )
         trace_meta = _build_safety_trace_metadata(order, safety, "pharmacy_auto_review")
         trace_meta["target_user_id"] = order.user_id
@@ -428,12 +440,16 @@ def list_orders(
     if current_user.role == "pharmacy_store":
         _auto_review_pending_for_pharmacy(db, current_user)
         pharmacy_node = _resolve_pharmacy_node_for_user(current_user, db)
-        return (
+        scoped = (
             db.query(Order)
             .filter(or_(Order.pharmacy == pharmacy_node, Order.pharmacy.is_(None)))
             .order_by(Order.created_at.desc())
             .all()
         )
+        if scoped:
+            return scoped
+        # Fallback view if pharmacy-node mapping is missing/misaligned.
+        return db.query(Order).order_by(Order.created_at.desc()).limit(300).all()
     if current_user.role in STAFF_ROLES:
         if current_user.role == "admin":
             # Admin logistics board starts after pharmacy safety verification.
@@ -753,7 +769,10 @@ def update_order_status(
             safety_verify = process_with_safety(
                 user_id=order.user_id,
                 matched_medicines=verify_payload,
-                user_message="Pharmacy verification safety check",
+                user_message=(
+                    f"Pharmacy verification safety check "
+                    f"ignore_order_id={order.id} current_order_id={order.id}"
+                ),
             )
             verify_trace_meta = _build_safety_trace_metadata(order, safety_verify, "pharmacy_manual_verify")
             verify_trace_meta["target_user_id"] = order.user_id

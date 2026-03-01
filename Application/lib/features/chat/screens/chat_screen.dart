@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:flutter_tts/flutter_tts.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/rx_theme_ext.dart';
 import '../../../core/widgets/shared_widgets.dart';
@@ -27,8 +28,11 @@ class _CS extends State<ChatScreen> {
   bool _speechReady = false;
   bool _speechInitInProgress = false;
   DateTime? _lastSpeechInitAttempt;
+  Set<String> _supportedLocales = <String>{};
   final Set<String> _spokenMessageIds = <String>{};
   bool _spokeVoiceTextHint = false;
+  String _pendingTranscript = '';
+  String _lastFlushedTranscript = '';
 
   @override
   void initState() {
@@ -55,6 +59,11 @@ class _CS extends State<ChatScreen> {
     _lastSpeechInitAttempt = now;
     _speechInitInProgress = true;
     try {
+      final mic = await Permission.microphone.request();
+      if (!mic.isGranted) {
+        _speechReady = false;
+        return false;
+      }
       _speechReady = await _speech.initialize(
         onStatus: (status) {
           if ((status == 'done' || status == 'notListening') && mounted) {
@@ -62,10 +71,17 @@ class _CS extends State<ChatScreen> {
             if (bloc.state.isRecording) {
               bloc.add(ToggleRecordingEvent());
             }
+            _flushPendingTranscript();
           }
         },
         onError: (_) {},
       );
+      if (_speechReady) {
+        try {
+          final locales = await _speech.locales();
+          _supportedLocales = locales.map((e) => e.localeId).toSet();
+        } catch (_) {}
+      }
       return _speechReady;
     } catch (_) {
       _speechReady = false;
@@ -80,6 +96,16 @@ class _CS extends State<ChatScreen> {
     if (c == 'hi') return 'hi_IN';
     if (c == 'mr') return 'mr_IN';
     return 'en_IN';
+  }
+
+  String _bestLocaleFor(String langCode) {
+    final preferred = _localeFor(langCode);
+    if (_supportedLocales.isEmpty || _supportedLocales.contains(preferred)) {
+      return preferred;
+    }
+    if (_supportedLocales.contains('en_IN')) return 'en_IN';
+    if (_supportedLocales.contains('en_US')) return 'en_US';
+    return _supportedLocales.first;
   }
 
   @override
@@ -123,19 +149,43 @@ class _CS extends State<ChatScreen> {
       await _tts.stop();
     } catch (_) {}
     context.read<ChatBloc>().add(ToggleRecordingEvent());
+    _pendingTranscript = '';
+    try {
+      await _speech.cancel();
+    } catch (_) {}
     await _speech.listen(
       onResult: (result) {
+        _pendingTranscript = result.recognizedWords;
         setState(() {
           _tc.text = result.recognizedWords;
           _tc.selection = TextSelection.fromPosition(TextPosition(offset: _tc.text.length));
         });
         if (result.finalResult && _tc.text.trim().isNotEmpty) {
           _send();
+          _lastFlushedTranscript = _tc.text.trim().toLowerCase();
         }
       },
-      listenMode: stt.ListenMode.confirmation,
-      localeId: _localeFor(state.languageCode),
+      listenMode: stt.ListenMode.dictation,
+      localeId: _bestLocaleFor(state.languageCode),
+      listenFor: const Duration(seconds: 20),
+      pauseFor: const Duration(seconds: 4),
+      partialResults: true,
     );
+  }
+
+  void _flushPendingTranscript() {
+    final text = _pendingTranscript.trim();
+    if (text.isEmpty) return;
+    final norm = text.toLowerCase();
+    if (norm == _lastFlushedTranscript) return;
+    _lastFlushedTranscript = norm;
+    setState(() {
+      _tc.text = text;
+      _tc.selection = TextSelection.fromPosition(TextPosition(offset: _tc.text.length));
+    });
+    if (text.length >= 2) {
+      _send();
+    }
   }
 
   void _scrollEnd() => WidgetsBinding.instance.addPostFrameCallback((_) {
