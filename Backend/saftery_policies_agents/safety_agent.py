@@ -756,7 +756,6 @@ def _verify_prescription_with_gemini_ocr(medicine_name: str, rx_file: str) -> di
       - image must contain enough readable prescription text
       - no inferred/hallucinated details allowed
     """
-    del medicine_name
     if pytesseract is None or Image is None:
         return {
             "ok": False,
@@ -788,6 +787,9 @@ def _verify_prescription_with_gemini_ocr(medicine_name: str, rx_file: str) -> di
         }
 
     text_norm = _normalize_text(extracted_text)
+    medicine_tokens = [t for t in _normalize_text(medicine_name).split() if len(t) >= 4 and not re.fullmatch(r"\d+", t)]
+    medicine_token_hits = sum(1 for t in medicine_tokens if t in text_norm)
+    medicine_name_present = medicine_token_hits >= (2 if len(medicine_tokens) >= 2 else 1)
     rx_markers = {"rx", "prescription", "doctor", "patient", "clinic", "hospital"}
     marker_hits = sum(1 for k in rx_markers if k in text_norm)
     is_prescription = marker_hits >= 2
@@ -807,19 +809,30 @@ def _verify_prescription_with_gemini_ocr(medicine_name: str, rx_file: str) -> di
             "is_clear": is_clear,
             "doctor_present": doctor_present,
             "medicine_or_dosage_present": medicine_or_dosage_present,
+            "medicine_name_present": medicine_name_present,
+            "medicine_token_hits": medicine_token_hits,
             "extracted_text_length": len(extracted_text),
             "ocr_confidence": ocr_conf,
             "confidence": confidence,
             "reason": reason,
         }
     )
-    text_ok = len(extracted_text) >= 30 and _looks_like_medical_text(extracted_text) and ocr_conf >= 40.0
-    passed = is_prescription and is_clear and doctor_present and medicine_or_dosage_present and confidence >= 0.65
+    text_ok = len(extracted_text) >= 45 and _looks_like_medical_text(extracted_text) and ocr_conf >= 45.0
+    passed = (
+        is_prescription
+        and is_clear
+        and doctor_present
+        and medicine_or_dosage_present
+        and medicine_name_present
+        and confidence >= 0.70
+    )
     indicators = {
         "is_prescription": is_prescription,
         "is_clear": is_clear,
         "doctor_present": doctor_present,
         "medicine_or_dosage_present": medicine_or_dosage_present,
+        "medicine_name_present": medicine_name_present,
+        "medicine_token_hits": medicine_token_hits,
         "text_detected": text_ok,
         "ocr_confidence": ocr_conf,
         "marker_hits": marker_hits,
@@ -955,12 +968,48 @@ def _prescription_mentions_dosage(text: str, dosage_instruction: str) -> bool:
         return False
     if d in t:
         return True
-    # Accept numeric schedule presence (e.g. 1-0-1, 1 0 1).
-    nums = re.findall(r"\d+", dosage_instruction or "")
-    if nums and " ".join(nums) in t:
-        return True
-    tokens = [x for x in d.split() if len(x) >= 3]
-    return any(tok in t for tok in tokens)
+    # Require explicit numeric schedule parity (e.g. 1-0-1 / 1 0 1).
+    nums = [n for n in re.findall(r"\d+", dosage_instruction or "") if n.strip()]
+    if nums:
+        if " ".join(nums) in t:
+            return True
+        # x/day style: first number plus day indicator should be present.
+        if len(nums) == 1 and nums[0] in t and any(k in t for k in {"day", "daily", "od", "bd", "tid", "qid"}):
+            return True
+        return False
+
+    # Word-frequency mapping must align.
+    freq_alias = {
+        "once": {"once", "od", "daily", "one"},
+        "twice": {"twice", "bd", "two", "2"},
+        "thrice": {"thrice", "tid", "three", "3"},
+    }
+    for key, aliases in freq_alias.items():
+        if key in d:
+            return any(a in t for a in aliases) and any(k in t for k in {"day", "daily", "od", "bd", "tid", "qid"})
+
+    # Fallback: require at least two meaningful dosage tokens to match.
+    stop = {
+        "take",
+        "after",
+        "before",
+        "food",
+        "meal",
+        "tablet",
+        "tablets",
+        "capsule",
+        "capsules",
+        "tab",
+        "cap",
+        "and",
+        "the",
+        "for",
+    }
+    tokens = [x for x in d.split() if len(x) >= 4 and x not in stop]
+    if len(tokens) < 2:
+        return False
+    hits = sum(1 for tok in tokens if tok in t)
+    return hits >= 2
 
 
 def _prescription_mentions_strips(text: str, strips: int) -> bool:
