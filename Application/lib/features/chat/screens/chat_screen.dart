@@ -128,10 +128,47 @@ class _CS extends State<ChatScreen> {
   }
 
   Future<void> _pickAndUploadPrescription() async {
-    final xfile = await _picker.pickImage(source: ImageSource.gallery, imageQuality: 85);
+    final source = await _showPrescriptionSourceSheet();
+    if (source == null) return;
+    final xfile = await _picker.pickImage(
+      source: source,
+      imageQuality: 85,
+      preferredCameraDevice: CameraDevice.rear,
+    );
     if (xfile == null) return;
     if (!mounted) return;
     context.read<ChatBloc>().add(UploadPrescriptionEvent(xfile.path));
+  }
+
+  Future<ImageSource?> _showPrescriptionSourceSheet() async {
+    if (!mounted) return null;
+    return showModalBottomSheet<ImageSource>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) {
+        final r = ctx.rx;
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.camera_alt_rounded),
+                title: Text('Take Photo', style: GoogleFonts.outfit(color: r.text1)),
+                subtitle: Text('Capture prescription from camera', style: GoogleFonts.outfit(color: r.text3, fontSize: 12)),
+                onTap: () => Navigator.of(ctx).pop(ImageSource.camera),
+              ),
+              ListTile(
+                leading: const Icon(Icons.photo_library_rounded),
+                title: Text('Choose from Gallery', style: GoogleFonts.outfit(color: r.text1)),
+                subtitle: Text('Upload existing prescription image', style: GoogleFonts.outfit(color: r.text3, fontSize: 12)),
+                onTap: () => Navigator.of(ctx).pop(ImageSource.gallery),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _toggleVoice(ChatState state) async {

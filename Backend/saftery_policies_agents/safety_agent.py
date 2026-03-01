@@ -183,6 +183,7 @@ def _load_and_check_all(
     })
 
     results: list[SafetyCheckResult] = []
+    order_reference_dt = _resolve_order_reference_datetime(db, user_id, current_order_id)
 
     ocr_cache: dict[str, dict] = {}
     for item in matched:
@@ -219,6 +220,7 @@ def _load_and_check_all(
             user_id=user_id,
             ignore_order_ids=ignore_order_ids,
             current_order_id=current_order_id,
+            order_reference_dt=order_reference_dt,
             med=med,
             qty=qty,
             strips_count=strips_count,
@@ -247,6 +249,7 @@ def _evaluate_rules(
     user_id: int,
     ignore_order_ids: set[int] | None,
     current_order_id: int | None,
+    order_reference_dt: datetime,
     med: Medicine,
     qty: int,
     strips_count: int | None,
@@ -444,6 +447,63 @@ def _evaluate_rules(
                 detail={
                     "confidence": ocr_decision.get("confidence"),
                     "indicators": {**ocr_decision.get("indicators", {}), "medicine_name_found": False},
+                },
+            )
+        max_age_days = _max_prescription_age_days()
+        rx_date = _extract_prescription_date(extracted_text)
+        if rx_date is None:
+            return SafetyCheckResult(
+                medicine_id=med.id,
+                medicine_name=name,
+                status="blocked",
+                rule="prescription_date_missing_or_unreadable",
+                message=(
+                    f"{name}: prescription date is missing or unreadable. "
+                    "Please upload a clear and recent prescription."
+                ),
+                detail={
+                    "confidence": ocr_decision.get("confidence"),
+                    "indicators": {**ocr_decision.get("indicators", {}), "prescription_date_found": False},
+                    "order_reference_at": _format_dt_utc(order_reference_dt),
+                    "max_allowed_age_days": max_age_days,
+                },
+            )
+        age_days = int((order_reference_dt - rx_date).total_seconds() // 86400)
+        if age_days < 0:
+            return SafetyCheckResult(
+                medicine_id=med.id,
+                medicine_name=name,
+                status="blocked",
+                rule="prescription_date_future",
+                message=(
+                    f"{name}: prescription date appears to be in the future "
+                    f"({rx_date.strftime('%Y-%m-%d')}). Please upload a valid prescription."
+                ),
+                detail={
+                    "confidence": ocr_decision.get("confidence"),
+                    "indicators": {**ocr_decision.get("indicators", {}), "prescription_date_found": True},
+                    "prescription_date": rx_date.strftime("%Y-%m-%d"),
+                    "order_reference_at": _format_dt_utc(order_reference_dt),
+                    "max_allowed_age_days": max_age_days,
+                },
+            )
+        if age_days > max_age_days:
+            return SafetyCheckResult(
+                medicine_id=med.id,
+                medicine_name=name,
+                status="blocked",
+                rule="prescription_too_old",
+                message=(
+                    f"{name}: prescription is too old ({age_days} day(s)). "
+                    f"Only prescriptions up to {max_age_days} day(s) old are accepted."
+                ),
+                detail={
+                    "confidence": ocr_decision.get("confidence"),
+                    "indicators": {**ocr_decision.get("indicators", {}), "prescription_date_found": True},
+                    "prescription_date": rx_date.strftime("%Y-%m-%d"),
+                    "order_reference_at": _format_dt_utc(order_reference_dt),
+                    "prescription_age_days": age_days,
+                    "max_allowed_age_days": max_age_days,
                 },
             )
 
@@ -922,6 +982,119 @@ def _load_prescription_bytes(rx_file: str) -> tuple[bytes, str]:
 def _guess_mime(path: str) -> str:
     guessed, _ = mimetypes.guess_type(path)
     return guessed or "application/octet-stream"
+
+
+def _resolve_order_reference_datetime(db, user_id: int, current_order_id: int | None) -> datetime:
+    now = datetime.now(timezone.utc)
+    if not isinstance(current_order_id, int) or current_order_id <= 0:
+        return now
+    try:
+        order = (
+            db.query(Order)
+            .filter(Order.id == current_order_id, Order.user_id == user_id)
+            .first()
+        )
+    except Exception:
+        order = None
+    if not order:
+        return now
+    dt = order.created_at or order.updated_at or order.last_status_updated_at or now
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _max_prescription_age_days() -> int:
+    raw = os.getenv("RX_MAX_PRESCRIPTION_AGE_DAYS", "30").strip()
+    try:
+        parsed = int(raw)
+    except Exception:
+        parsed = 30
+    # Keep this configurable for policy changes (e.g., 7 days or 30 days).
+    return max(1, min(parsed, 365))
+
+
+def _extract_prescription_date(text: str) -> datetime | None:
+    src = str(text or "")
+    if not src.strip():
+        return None
+    now = datetime.now(timezone.utc)
+    month_map = {
+        "jan": 1, "january": 1,
+        "feb": 2, "february": 2,
+        "mar": 3, "march": 3,
+        "apr": 4, "april": 4,
+        "may": 5,
+        "jun": 6, "june": 6,
+        "jul": 7, "july": 7,
+        "aug": 8, "august": 8,
+        "sep": 9, "sept": 9, "september": 9,
+        "oct": 10, "october": 10,
+        "nov": 11, "november": 11,
+        "dec": 12, "december": 12,
+    }
+
+    def _norm_year(y: int) -> int:
+        if y < 100:
+            return 2000 + y
+        return y
+
+    def _mk_date(y: int, m: int, d: int) -> datetime | None:
+        try:
+            dt = datetime(_norm_year(y), m, d, tzinfo=timezone.utc)
+        except Exception:
+            return None
+        if dt > now.replace(hour=23, minute=59, second=59, microsecond=999999):
+            return None
+        if dt.year < (now.year - 10):
+            return None
+        return dt
+
+    candidates: list[datetime] = []
+
+    for m in re.finditer(r"\b([0-3]?\d)[/\-.]([01]?\d)[/\-.](\d{2,4})\b", src, flags=re.IGNORECASE):
+        day, month, year = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        dt = _mk_date(year, month, day)
+        if dt:
+            candidates.append(dt)
+
+    for m in re.finditer(r"\b(\d{4})[/\-.]([01]?\d)[/\-.]([0-3]?\d)\b", src, flags=re.IGNORECASE):
+        year, month, day = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        dt = _mk_date(year, month, day)
+        if dt:
+            candidates.append(dt)
+
+    for m in re.finditer(
+        r"\b([0-3]?\d)\s*(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s*,?\s*(\d{2,4})\b",
+        src,
+        flags=re.IGNORECASE,
+    ):
+        day, month_txt, year = int(m.group(1)), m.group(2).lower(), int(m.group(3))
+        month = month_map.get(month_txt)
+        if month:
+            dt = _mk_date(year, month, day)
+            if dt:
+                candidates.append(dt)
+
+    for m in re.finditer(
+        r"\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s*([0-3]?\d)\s*,?\s*(\d{2,4})\b",
+        src,
+        flags=re.IGNORECASE,
+    ):
+        month_txt, day, year = m.group(1).lower(), int(m.group(2)), int(m.group(3))
+        month = month_map.get(month_txt)
+        if month:
+            dt = _mk_date(year, month, day)
+            if dt:
+                candidates.append(dt)
+
+    if not candidates:
+        return None
+    # If OCR catches multiple dates (follow-up date, etc.), use the latest non-future date.
+    return max(candidates)
+
+
+def _format_dt_utc(dt: datetime) -> str:
+    dt_utc = dt.astimezone(timezone.utc) if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    return dt_utc.strftime("%Y-%m-%d %H:%M:%S UTC")
 
 
 def _normalize_text(text: str) -> str:
