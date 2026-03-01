@@ -88,10 +88,19 @@ raw_origins = os.getenv(
     "http://localhost:3000,http://127.0.0.1:3000,https://rxcompute-web-main.onrender.com",
 )
 cors_origins = [o.strip() for o in raw_origins.split(",") if o.strip()]
+# Always allow local dashboard/dev origins even if env var is misconfigured.
+must_allow_origins = {
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+}
+for _origin in must_allow_origins:
+    if _origin not in cors_origins:
+        cors_origins.append(_origin)
 allow_any_origin = "*" in cors_origins
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"] if allow_any_origin else cors_origins,
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     # Browsers reject wildcard+credentials; keep credentials off for bearer-token API calls.
     allow_credentials=False if allow_any_origin else True,
     allow_methods=["*"],

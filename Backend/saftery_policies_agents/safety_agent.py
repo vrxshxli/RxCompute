@@ -284,7 +284,7 @@ def _evaluate_rules(
             message=f"{name} still has approximately {days_remaining} day(s) remaining. Reorder is allowed only after current cycle is finished.",
             detail={"days_remaining": days_remaining},
         )
-    if days_remaining is None:
+    if days_remaining is None or days_remaining <= 0:
         hist_days_remaining = _estimated_days_remaining_from_latest_delivery_history(db, user_id, med.id, med.package)
         if hist_days_remaining is not None and hist_days_remaining > 0:
             reasoning = (
@@ -300,6 +300,44 @@ def _evaluate_rules(
                 message=f"{name} appears to still be active from your latest delivered order ({hist_days_remaining} day(s) remaining).",
                 detail={"days_remaining": hist_days_remaining},
             )
+
+    # RULE 0c: Same-day duplicate purchase attempts should be rejected.
+    same_day_order = _latest_same_day_order_for_medicine(
+        db,
+        user_id,
+        med.id,
+        ignore_order_ids=ignore_order_ids,
+        current_order_id=current_order_id,
+    )
+    if same_day_order:
+        same_day_status = (
+            same_day_order.status.value
+            if hasattr(same_day_order.status, "value")
+            else str(same_day_order.status)
+        )
+        same_day_uid = same_day_order.order_uid
+        _langfuse_output(
+            {
+                "rule": "duplicate_same_day_order",
+                "status": "BLOCKED",
+                "existing_order_uid": same_day_uid,
+                "existing_status": same_day_status,
+            }
+        )
+        return SafetyCheckResult(
+            medicine_id=med.id,
+            medicine_name=name,
+            status="blocked",
+            rule="duplicate_same_day_order",
+            message=(
+                f"{name} was already ordered today ({same_day_uid}). "
+                "Please complete the current cycle before placing another order."
+            ),
+            detail={
+                "existing_order_uid": same_day_uid,
+                "existing_order_status": same_day_status,
+            },
+        )
 
     # RULE 0b: Same medicine already has active in-flight order.
     inflight = _has_active_inflight_order_for_medicine(
@@ -1082,6 +1120,50 @@ def _extract_current_order_id(user_message: str | None) -> int | None:
         return int(m.group(1))
     except Exception:
         return None
+
+
+def _latest_same_day_order_for_medicine(
+    db,
+    user_id: int,
+    medicine_id: int,
+    ignore_order_ids: set[int] | None = None,
+    current_order_id: int | None = None,
+) -> Order | None:
+    if not user_id or not medicine_id:
+        return None
+    today = datetime.now(timezone.utc).date()
+    allowed_statuses = [
+        OrderStatus.pending,
+        OrderStatus.confirmed,
+        OrderStatus.verified,
+        OrderStatus.picking,
+        OrderStatus.packed,
+        OrderStatus.dispatched,
+        OrderStatus.delivered,
+    ]
+    q = (
+        db.query(Order)
+        .join(OrderItem, OrderItem.order_id == Order.id)
+        .filter(
+            Order.user_id == user_id,
+            OrderItem.medicine_id == medicine_id,
+            Order.status.in_(allowed_statuses),
+        )
+    )
+    if ignore_order_ids:
+        q = q.filter(~Order.id.in_(list(ignore_order_ids)))
+    if isinstance(current_order_id, int) and current_order_id > 0:
+        q = q.filter(Order.id < current_order_id)
+    candidates = q.order_by(Order.created_at.desc()).limit(5).all()
+    for order in candidates:
+        dt = order.created_at or order.updated_at or order.last_status_updated_at
+        if not dt:
+            continue
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        if dt.date() == today:
+            return order
+    return None
 
 
 def _estimated_days_remaining_from_latest_delivery_history(

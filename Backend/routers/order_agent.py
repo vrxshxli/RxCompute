@@ -310,6 +310,25 @@ def place_direct(
         raise HTTPException(400, "No items")
 
     items_dicts = [it.model_dump() for it in data.items]
+    safety = process_with_safety(
+        user_id=current_user.id,
+        matched_medicines=items_dicts,
+        user_message="Order Agent direct placement safety check",
+    )
+    if safety.get("has_blocks"):
+        exception_result = handle_order_exceptions(
+            user_id=current_user.id,
+            safety_results=safety.get("safety_results", []) or [],
+            matched_medicines=items_dicts,
+        )
+        return {
+            "success": False,
+            "stage": "safety_agent",
+            "blocked": True,
+            "safety_summary": safety.get("safety_summary", ""),
+            "safety_results": safety.get("safety_results", []),
+            "exception_result": exception_result,
+        }
 
     result = place_order(
         user_id=current_user.id,

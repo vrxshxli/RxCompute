@@ -33,6 +33,8 @@ class _CS extends State<ChatScreen> {
   bool _spokeVoiceTextHint = false;
   String _pendingTranscript = '';
   String _lastFlushedTranscript = '';
+  bool _voiceSessionOpen = false;
+  bool _voiceSentForSession = false;
 
   @override
   void initState() {
@@ -140,6 +142,7 @@ class _CS extends State<ChatScreen> {
     }
     if (state.isRecording) {
       await _speech.stop();
+      _voiceSessionOpen = false;
       if (mounted) context.read<ChatBloc>().add(ToggleRecordingEvent());
       return;
     }
@@ -150,6 +153,8 @@ class _CS extends State<ChatScreen> {
     } catch (_) {}
     context.read<ChatBloc>().add(ToggleRecordingEvent());
     _pendingTranscript = '';
+    _voiceSessionOpen = true;
+    _voiceSentForSession = false;
     try {
       await _speech.cancel();
     } catch (_) {}
@@ -160,9 +165,11 @@ class _CS extends State<ChatScreen> {
           _tc.text = result.recognizedWords;
           _tc.selection = TextSelection.fromPosition(TextPosition(offset: _tc.text.length));
         });
-        if (result.finalResult && _tc.text.trim().isNotEmpty) {
+        final spoken = result.recognizedWords.trim();
+        if (result.finalResult && spoken.isNotEmpty && !_voiceSentForSession) {
+          _voiceSentForSession = true;
+          _lastFlushedTranscript = spoken.toLowerCase();
           _send();
-          _lastFlushedTranscript = _tc.text.trim().toLowerCase();
         }
       },
       listenMode: stt.ListenMode.dictation,
@@ -174,6 +181,9 @@ class _CS extends State<ChatScreen> {
   }
 
   void _flushPendingTranscript() {
+    if (!_voiceSessionOpen) return;
+    _voiceSessionOpen = false;
+    if (_voiceSentForSession) return;
     final text = _pendingTranscript.trim();
     if (text.isEmpty) return;
     final norm = text.toLowerCase();
@@ -184,6 +194,7 @@ class _CS extends State<ChatScreen> {
       _tc.selection = TextSelection.fromPosition(TextPosition(offset: _tc.text.length));
     });
     if (text.length >= 2) {
+      _voiceSentForSession = true;
       _send();
     }
   }
