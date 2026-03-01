@@ -428,13 +428,14 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
 
     if (aiIntent == 'cancel_order' || _isCancelOrderCommand(l)) {
       if (_lastPlacedOrderId == null) {
+        _resetDraft();
         return [
           ChatMessage(
             id: '${now.millisecondsSinceEpoch}',
             isUser: false,
             text: _t(
-              hi: 'Cancel करने के लिए कोई recent order नहीं मिला। पहले order place करें।',
-              en: 'No recent order found to cancel. Please place an order first.',
+              hi: 'कोई recent order cancel करने के लिए नहीं मिला। Chat stop kar di hai — jab chaho "new chat" bolo.',
+              en: 'No recent order found to cancel. Chat is stopped now — say "new chat" anytime.',
             ),
             timestamp: now,
           ),
@@ -442,6 +443,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       }
       try {
         final cancelled = await _orderRepo.cancelMyOrder(_lastPlacedOrderId!);
+        _resetDraft();
         return [
           ChatMessage(
             id: '${now.millisecondsSinceEpoch}',
@@ -870,6 +872,17 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         t == 'end chat' ||
         t == 'stop chat' ||
         t == 'finish chat' ||
+        t.contains('i want nothing') ||
+        t.contains('want nothing') ||
+        t.contains('need nothing') ||
+        t.contains("don't want anything") ||
+        t.contains('do not want anything') ||
+        t.contains('nothing else') ||
+        t.contains('leave it') ||
+        t.contains('skip it') ||
+        t.contains('rehne do') ||
+        t.contains('nahi chahiye') ||
+        t.contains('kuch nahi chahiye') ||
         t.contains('end conversation') ||
         t.contains('chat बंद') ||
         t.contains('चैट बंद');
@@ -1169,9 +1182,16 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     final t = text.trim();
     return t == 'cancel' ||
         t == 'cancel order' ||
+        t.contains('cancel order') ||
+        t.contains('cancel the order') ||
+        t.contains('want to cancel order') ||
+        t.contains('i want to cancel order') ||
+        t.contains('please cancel order') ||
         t.contains('cancel my order') ||
         t.contains('order cancel') ||
+        t.contains('cancel this order') ||
         t.contains('ऑर्डर कैंसल') ||
+        t.contains('order ko cancel') ||
         t.contains('order radd') ||
         t.contains('order radd karo');
   }

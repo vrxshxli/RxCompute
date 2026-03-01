@@ -170,6 +170,19 @@ export default function AdminAgentTraces() {
         <div style={{ fontSize:11, color:T.gray500 }}>
           Phase: {l?.metadata?.phase || '-'} · Triggered by: {l?.metadata?.triggered_by_role || '-'} {l?.metadata?.triggered_by_user_id ? `#${l.metadata.triggered_by_user_id}` : ''}
         </div>
+        {Array.isArray(l?.metadata?.data_fetch_from) || Array.isArray(l?.metadata?.data_passed_to) ? (
+          <div style={{ border:`1px solid ${T.gray200}`, borderRadius:8, padding:10, background:T.gray50 }}>
+            <div style={{ fontSize:11, color:T.gray700, lineHeight:1.5 }}>
+              <b>Fetches from:</b> {Array.isArray(l?.metadata?.data_fetch_from) ? l.metadata.data_fetch_from.join(" · ") : "-"}
+            </div>
+            <div style={{ fontSize:11, color:T.gray700, lineHeight:1.5, marginTop:4 }}>
+              <b>Passes to:</b> {Array.isArray(l?.metadata?.data_passed_to) ? l.metadata.data_passed_to.join(" · ") : "-"}
+            </div>
+            <div style={{ fontSize:11, color:T.gray600, lineHeight:1.5, marginTop:4 }}>
+              <b>Langfuse:</b> {l?.metadata?.langfuse_trace?.enabled ? "Enabled" : "Metadata-only trace"}{l?.metadata?.langfuse_trace?.span_entry ? ` · Entry span: ${l.metadata.langfuse_trace.span_entry}` : ""}{l?.metadata?.langfuse_trace?.note ? ` · ${l.metadata.langfuse_trace.note}` : ""}
+            </div>
+          </div>
+        ) : null}
         {l?.metadata?.agent_name === 'scheduler_agent' ? (
           <div style={{ fontSize:11, color:T.gray700, lineHeight:1.5 }}>
             Assigned: {l?.metadata?.assigned_pharmacy || '-'} · Score: {l?.metadata?.winning_score ?? '-'} · Fallback: {l?.metadata?.fallback_used ? 'Yes' : 'No'}

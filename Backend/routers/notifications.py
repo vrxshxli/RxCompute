@@ -24,6 +24,133 @@ from services.notifications import (
 router = APIRouter(prefix="/notifications", tags=["Notifications"])
 
 
+def _agent_flow_catalog(agent_name: str) -> dict:
+    a = (agent_name or "").strip().lower()
+    catalog = {
+        "conversational_agent": {
+            "fetch_from": ["user message/voice transcript", "medicine catalog API", "chat assistant intent parser (Gemini)"],
+            "pass_to": ["order_agent", "safety_agent", "mobile/web chat UI"],
+            "langfuse": {
+                "enabled": False,
+                "note": "Conversation intent traces are currently surfaced via notification metadata; Langfuse spans are limited for this agent.",
+            },
+        },
+        "order_agent": {
+            "fetch_from": ["chat payload (items/payment/location)", "user profile", "order history context"],
+            "pass_to": ["safety_agent", "exception_agent", "scheduler_agent", "orders router/db"],
+            "langfuse": {
+                "enabled": False,
+                "note": "Order orchestration is traced in agent notifications; downstream agents carry Langfuse spans.",
+            },
+        },
+        "safety_agent": {
+            "fetch_from": ["orders/order_items", "medicines", "user_medications", "OCR text from prescription image"],
+            "pass_to": ["exception_agent", "orders router (approve/block)", "admin/pharmacy/user notifications"],
+            "langfuse": {
+                "enabled": True,
+                "span_entry": "safety_agent",
+                "spans": ["safety_load_medicines", "safety_evaluate_rules", "safety_prescription_ocr", "safety_interaction_rules"],
+            },
+        },
+        "exception_agent": {
+            "fetch_from": ["blocked/warning safety outputs", "order context", "medicine alternatives"],
+            "pass_to": ["pharmacy exception queue", "admin traces", "user notifications"],
+            "langfuse": {
+                "enabled": True,
+                "span_entry": "exception_agent",
+                "spans": ["exception_handle_all", "exception_classify", "exception_find_alternatives", "exception_escalate"],
+            },
+        },
+        "scheduler_agent": {
+            "fetch_from": ["order location", "pharmacy/store availability", "distance/eligibility scoring"],
+            "pass_to": ["orders router assignment", "admin trace stream", "pharmacy queue"],
+            "langfuse": {
+                "enabled": False,
+                "note": "Scheduler execution is captured in metadata trace events.",
+            },
+        },
+        "prediction_agent": {
+            "fetch_from": ["orders history", "user medication timelines", "velocity/consumption stats", "RAG context"],
+            "pass_to": ["refill alerts", "demand forecast trigger", "notifications"],
+            "langfuse": {
+                "enabled": True,
+                "span_entry": "prediction_agent_full_scan",
+                "spans": ["prediction_scan_all", "prediction_patient", "prediction_velocity", "prediction_create_alert"],
+            },
+        },
+        "demand_forecast_agent": {
+            "fetch_from": ["historical orders", "medicine-level demand series", "pharmacy breakdown"],
+            "pass_to": ["reorder alerts", "admin/pharmacy dashboards", "notification traces"],
+            "langfuse": {
+                "enabled": True,
+                "span_entry": "demand_forecast_full_scan",
+                "spans": ["demand_build_timeseries", "demand_linear_regression", "demand_pharmacy_breakdown"],
+            },
+        },
+        "admin_automation_agent": {
+            "fetch_from": ["order status transitions", "automation step state machine"],
+            "pass_to": ["admin workflow timeline", "order status notifications"],
+            "langfuse": {
+                "enabled": False,
+                "note": "Automation step events are persisted as trace metadata notifications.",
+            },
+        },
+    }
+    return catalog.get(
+        a,
+        {
+            "fetch_from": ["trace metadata", "notification body/title"],
+            "pass_to": ["admin workflow timeline"],
+            "langfuse": {"enabled": False, "note": "No explicit agent catalog entry was found."},
+        },
+    )
+
+
+def _enrich_trace_metadata(title: str, body: str, metadata: dict | None, inferred_agent: str) -> dict:
+    base = metadata.copy() if isinstance(metadata, dict) else {}
+    flow = _agent_flow_catalog(inferred_agent)
+    existing_fetch = base.get("data_fetch_from")
+    if isinstance(existing_fetch, list):
+        fetch_list = existing_fetch
+    elif isinstance(existing_fetch, str) and existing_fetch.strip():
+        fetch_list = [existing_fetch.strip()]
+    else:
+        fetch_list = []
+    existing_pass = base.get("data_passed_to")
+    if isinstance(existing_pass, list):
+        pass_list = existing_pass
+    elif isinstance(existing_pass, str) and existing_pass.strip():
+        pass_list = [existing_pass.strip()]
+    else:
+        pass_list = []
+    # Keep response backward compatible while adding explainability for both new and old traces.
+    base.setdefault("agent_name", inferred_agent)
+    base.setdefault("trace_explainability_version", "v1")
+    base["data_fetch_from"] = list(dict.fromkeys(fetch_list + flow["fetch_from"]))
+    base["data_passed_to"] = list(dict.fromkeys(pass_list + flow["pass_to"]))
+    base["langfuse_trace"] = base.get("langfuse_trace") or flow["langfuse"]
+    if "phase" not in base:
+        txt = f"{title} {body}".lower()
+        if "verify" in txt:
+            base["phase"] = "verify"
+        elif "assign" in txt or "scheduler" in txt:
+            base["phase"] = "assign"
+        elif "forecast" in txt:
+            base["phase"] = "forecast"
+        elif "predict" in txt:
+            base["phase"] = "predict"
+        elif "exception" in txt:
+            base["phase"] = "exception"
+        else:
+            base["phase"] = "workflow"
+    if "data_flow_summary" not in base:
+        base["data_flow_summary"] = (
+            f"{inferred_agent} fetched from {', '.join(base['data_fetch_from'][:3])} "
+            f"and passed outputs to {', '.join(base['data_passed_to'][:3])}."
+        )
+    return base
+
+
 @router.get("/", response_model=list[NotificationOut])
 def list_notifications(
     limit: int = Query(default=120, ge=10, le=300),
@@ -291,7 +418,6 @@ def list_agent_traces(
     q = (
         db.query(Notification)
         .filter(
-            Notification.user_id == current_user.id,
             Notification.type == NotificationType.safety,
             or_(
                 Notification.title.ilike("%agent%"),
@@ -334,6 +460,7 @@ def list_agent_traces(
     items = []
     discovered_agents = set()
     target_ids = set()
+    recipient_ids = set()
     parsed_meta = {}
     for n in rows:
         meta = None
@@ -343,12 +470,14 @@ def list_agent_traces(
             except Exception:
                 meta = None
         parsed_meta[n.id] = meta
+        recipient_ids.add(n.user_id)
         if isinstance(meta, dict) and isinstance(meta.get("target_user_id"), int):
             target_ids.add(meta["target_user_id"])
 
     user_map = {}
-    if target_ids:
-        targets = db.query(User).filter(User.id.in_(list(target_ids))).all()
+    all_lookup_ids = set(target_ids) | set(recipient_ids)
+    if all_lookup_ids:
+        targets = db.query(User).filter(User.id.in_(list(all_lookup_ids))).all()
         user_map = {u.id: u for u in targets}
 
     for n in rows:
@@ -360,6 +489,8 @@ def list_agent_traces(
         if isinstance(meta, dict) and isinstance(meta.get("target_user_id"), int):
             target_user_id = meta["target_user_id"]
             target_user = user_map.get(target_user_id)
+        recipient_user = user_map.get(n.user_id)
+        enriched_meta = _enrich_trace_metadata(n.title or "", n.body or "", meta, inferred)
         items.append(
             {
                 "id": n.id,
@@ -369,11 +500,15 @@ def list_agent_traces(
                 "trace_id": f"trace-{n.id}",
                 "is_read": n.is_read,
                 "created_at": n.created_at,
-                "metadata": meta,
+                "metadata": enriched_meta,
                 "target_user_id": target_user.id if target_user else target_user_id,
                 "target_user_name": target_user.name if target_user else (meta.get("target_user_name") if isinstance(meta, dict) else None),
                 "target_user_email": target_user.email if target_user else (meta.get("target_user_email") if isinstance(meta, dict) else None),
                 "target_user_role": target_user.role if target_user else (meta.get("target_user_role") if isinstance(meta, dict) else None),
+                "recipient_user_id": n.user_id,
+                "recipient_user_name": recipient_user.name if recipient_user else None,
+                "recipient_user_email": recipient_user.email if recipient_user else None,
+                "recipient_user_role": recipient_user.role if recipient_user else None,
             }
         )
 

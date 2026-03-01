@@ -115,6 +115,9 @@ export default function AdminSafetyEvents() {
         title: _toText(r.title),
         body: _toText(r.body),
         status: _deriveStatus(r.title, r.body, meta.phase),
+        data_fetch_from: Array.isArray(meta.data_fetch_from) ? meta.data_fetch_from : [],
+        data_passed_to: Array.isArray(meta.data_passed_to) ? meta.data_passed_to : [],
+        langfuse_trace: meta.langfuse_trace || null,
       };
       const row = byTask.get(taskKey) || {
         key: taskKey,
@@ -238,6 +241,13 @@ export default function AdminSafetyEvents() {
                         <div style={{ fontSize: 11, color: T.gray600, marginTop: 2 }}>
                           {s.title} — {s.body}
                         </div>
+                        {(s.data_fetch_from.length || s.data_passed_to.length) ? (
+                          <div style={{ fontSize: 10, color: T.gray500, marginTop: 4, lineHeight: 1.5 }}>
+                            Fetch: {s.data_fetch_from.length ? s.data_fetch_from.join(" · ") : "-"}<br />
+                            Pass: {s.data_passed_to.length ? s.data_passed_to.join(" · ") : "-"}<br />
+                            Langfuse: {s.langfuse_trace?.enabled ? "Enabled" : "Metadata-only"}{s.langfuse_trace?.span_entry ? ` (${s.langfuse_trace.span_entry})` : ""}
+                          </div>
+                        ) : null}
                       </div>
                       <div style={{ fontSize: 10, color: T.gray400, fontFamily: "monospace" }}>
                         {new Date(s.created_at).toLocaleTimeString()}
