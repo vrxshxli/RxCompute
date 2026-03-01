@@ -56,16 +56,19 @@ export default function PharmacyOrderQueue() {
         last_status_updated_by_role: o.last_status_updated_by_role || null,
         last_status_updated_by_name: o.last_status_updated_by_name || null,
         last_status_updated_at: o.last_status_updated_at || null,
+        cancel_reason: o.cancel_reason || null,
       })),
     [orders, userMap],
   );
   const urgent = mapped.filter((o) => o.status === "pending" && o.items.some((it) => !!it.rx_required));
   const normal = mapped.filter((o) => o.status === "pending" && o.items.every((it) => !it.rx_required));
   const scheduled = mapped.filter((o) => ["verified", "picking", "packed", "dispatched"].includes(o.status));
+  const cancelled = mapped.filter((o) => o.status === "cancelled");
   const queueCards = [
     ...urgent.map((o) => ({ ...o, queue_type: "urgent" })),
     ...normal.map((o) => ({ ...o, queue_type: "normal" })),
     ...scheduled.map((o) => ({ ...o, queue_type: "scheduled" })),
+    ...cancelled.map((o) => ({ ...o, queue_type: "cancelled" })),
   ];
   const visibleCards = queueFilter === "all" ? queueCards : queueCards.filter((x) => x.queue_type === queueFilter);
 
@@ -123,10 +126,14 @@ export default function PharmacyOrderQueue() {
         {new Date(order.pharmacy_approved_at || order.last_status_updated_at || Date.now()).toLocaleString()}
       </div>
     ) : null}
+    {order.status === "cancelled" && order.cancel_reason ? (
+      <div style={{fontSize:11,color:T.red,marginBottom:8}}>Reason: {order.cancel_reason}</div>
+    ) : null}
     <div style={{display:"flex",gap:8}}>
       {type==="urgent"&&<><Btn variant="primary" size="sm" disabled={savingId===order.id} onClick={()=>setStatus(order.id,"verified")}>Approve Rx</Btn><Btn variant="secondary" size="sm" style={{color:T.red}} disabled={savingId===order.id} onClick={()=>setStatus(order.id,"cancelled")}>Reject</Btn></>}
       {type==="normal"&&<><Btn variant="success" size="sm" disabled={savingId===order.id} onClick={()=>setStatus(order.id,"verified")}><CheckCircle size={12}/>Approve</Btn><Btn variant="secondary" size="sm" disabled={savingId===order.id} onClick={()=>setStatus(order.id,"cancelled")}>Reject</Btn></>}
       {type==="scheduled"&&<span style={{fontSize:11,color:T.gray500}}>Status is handled by admin logistics</span>}
+      {type==="cancelled"&&<span style={{fontSize:11,color:T.red}}>Rejected by safety/admin</span>}
     </div>
   </div>;
   return (<div><PageHeader title="Order Queue" badge={String(mapped.length)} actions={<Btn variant="success" size="sm" onClick={load}><CheckCircle size={14}/>Refresh</Btn>}/>
@@ -138,6 +145,7 @@ export default function PharmacyOrderQueue() {
       <option value="urgent">Urgent Rx ({urgent.length})</option>
       <option value="normal">Normal ({normal.length})</option>
       <option value="scheduled">Scheduled ({scheduled.length})</option>
+      <option value="cancelled">Cancelled ({cancelled.length})</option>
     </select>
   </div>
   <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:12}}>

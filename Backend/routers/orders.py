@@ -1,5 +1,6 @@
 import uuid
 import re
+import json
 from datetime import datetime, timedelta
 from math import atan2, cos, radians, sin, sqrt
 
@@ -13,7 +14,7 @@ from models.user import User
 from models.order import Order, OrderItem, OrderStatus
 from models.medicine import Medicine
 from models.pharmacy_store import PharmacyStore
-from models.notification import NotificationType
+from models.notification import NotificationType, Notification
 from models.user_medication import UserMedication
 from schemas.order import OrderCreate, OrderOut, OrderStatusUpdate
 from exception_agent.exception_agent import handle_order_exceptions
@@ -211,6 +212,71 @@ def _duplicate_rejection_user_message(safety: dict) -> str | None:
             "Please complete the current medicine before placing the same order again."
         )
     return None
+
+
+def _extract_cancel_reason_from_notification(notif: Notification, order_uid: str) -> str | None:
+    if not notif:
+        return None
+    meta = None
+    if notif.metadata_json:
+        try:
+            meta = json.loads(notif.metadata_json)
+        except Exception:
+            meta = None
+    if isinstance(meta, dict):
+        uid = str(meta.get("order_uid") or "").strip()
+        if uid and uid.upper() == (order_uid or "").upper():
+            reason = str(meta.get("cancel_reason") or meta.get("reason") or "").strip()
+            if reason:
+                return reason
+    body = str(notif.body or "").strip()
+    if not body:
+        return None
+    # Fallback legacy format: "ORD-...: reason text"
+    m = re.match(r"^\s*((?:ORD|RFL)-\d{8}-[A-Z0-9]+)\s*:\s*(.+)$", body, flags=re.IGNORECASE)
+    if m and m.group(1).upper() == (order_uid or "").upper():
+        return m.group(2).strip()
+    return None
+
+
+def _attach_cancel_reasons(db: Session, orders: list[Order]) -> list[Order]:
+    if not orders:
+        return orders
+    cancelled = [
+        o
+        for o in orders
+        if (o.status.value if hasattr(o.status, "value") else str(o.status)) == OrderStatus.cancelled.value
+    ]
+    if not cancelled:
+        return orders
+    by_uid = {str(o.order_uid or ""): o for o in cancelled if str(o.order_uid or "").strip()}
+    if not by_uid:
+        return orders
+    user_ids = list({int(o.user_id) for o in cancelled if o.user_id})
+    notif_rows = (
+        db.query(Notification)
+        .filter(
+            Notification.user_id.in_(user_ids),
+            Notification.type == NotificationType.safety,
+        )
+        .order_by(Notification.created_at.desc())
+        .limit(3000)
+        .all()
+    )
+    reason_map: dict[str, str] = {}
+    for n in notif_rows:
+        if not n:
+            continue
+        # Try all UIDs still unresolved.
+        for uid in list(by_uid.keys()):
+            if uid in reason_map:
+                continue
+            r = _extract_cancel_reason_from_notification(n, uid)
+            if r:
+                reason_map[uid] = r
+    for uid, order in by_uid.items():
+        setattr(order, "cancel_reason", reason_map.get(uid))
+    return orders
 
 
 def _publish_scheduler_alert(
@@ -601,7 +667,7 @@ def _auto_review_pending_for_pharmacy(db: Session, pharmacy_user: User) -> None:
                 "Safety Agent Rejected Order",
                 reason,
                 has_action=True,
-                metadata=trace_meta,
+                metadata={**(trace_meta or {}), "order_uid": order.order_uid, "cancel_reason": reason},
             )
             if order_owner:
                 run_in_background(send_push_to_token, order_owner.push_token, "Safety Agent Rejected Order", reason, order_owner.id)
@@ -631,7 +697,15 @@ def _auto_review_pending_for_pharmacy(db: Session, pharmacy_user: User) -> None:
             order.last_status_updated_by_role = pharmacy_user.role
             order.last_status_updated_by_name = pharmacy_user.name or pharmacy_user.email or f"User #{pharmacy_user.id}"
             order.last_status_updated_at = now
-            create_notification(db, order.user_id, NotificationType.safety, "Order Rejected During Auto Review", stock_reason, has_action=True)
+            create_notification(
+                db,
+                order.user_id,
+                NotificationType.safety,
+                "Order Rejected During Auto Review",
+                stock_reason,
+                has_action=True,
+                metadata={"order_uid": order.order_uid, "cancel_reason": stock_reason},
+            )
             if order_owner:
                 run_in_background(send_push_to_token, order_owner.push_token, "Order Rejected During Auto Review", stock_reason, order_owner.id)
                 run_in_background(send_safety_rejection_email, order_owner.email, order.order_uid, stock_reason)
@@ -651,6 +725,7 @@ def _auto_review_pending_for_pharmacy(db: Session, pharmacy_user: User) -> None:
                 "Safety Agent Rejected Order",
                 strict_duplicate_reason,
                 has_action=True,
+                metadata={"order_uid": order.order_uid, "cancel_reason": strict_duplicate_reason},
             )
             if order_owner:
                 run_in_background(
@@ -812,27 +887,31 @@ def list_orders(
             .all()
         )
         if scoped:
-            return scoped
+            return _attach_cancel_reasons(db, scoped)
         # Fallback view if pharmacy-node mapping is missing/misaligned.
-        return db.query(Order).order_by(Order.created_at.desc()).limit(300).all()
+        rows = db.query(Order).order_by(Order.created_at.desc()).limit(300).all()
+        return _attach_cancel_reasons(db, rows)
     if current_user.role in STAFF_ROLES:
         if current_user.role == "admin":
             _auto_progress_admin_logistics(db)
             # Admin logistics board starts after pharmacy safety verification.
             # Pending orders are handled in pharmacy dashboard first.
-            return (
+            rows = (
                 db.query(Order)
                 .filter(Order.status != OrderStatus.pending)
                 .order_by(Order.created_at.desc())
                 .all()
             )
-        return db.query(Order).order_by(Order.created_at.desc()).all()
-    return (
+            return _attach_cancel_reasons(db, rows)
+        rows = db.query(Order).order_by(Order.created_at.desc()).all()
+        return _attach_cancel_reasons(db, rows)
+    rows = (
         db.query(Order)
         .filter(Order.user_id == current_user.id)
         .order_by(Order.created_at.desc())
         .all()
     )
+    return _attach_cancel_reasons(db, rows)
 
 
 @router.get("/{order_id}", response_model=OrderOut)
@@ -853,6 +932,7 @@ def get_order(
     order = query.first()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    _attach_cancel_reasons(db, [order])
     return order
 
 
@@ -1245,7 +1325,11 @@ def update_order_status(
                 auto_reject_reason,
                 has_action=True,
                 dedupe_window_minutes=1,
-                metadata=verify_trace_meta if "verify_trace_meta" in locals() else None,
+                metadata={
+                    **((verify_trace_meta if "verify_trace_meta" in locals() else {}) or {}),
+                    "order_uid": order.order_uid,
+                    "cancel_reason": auto_reject_reason,
+                },
             )
         db.commit()
         if order_owner:
@@ -1305,6 +1389,7 @@ def cancel_order(
     order.last_status_updated_at = datetime.utcnow()
     db.commit()
     db.refresh(order)
+    setattr(order, "cancel_reason", "Order cancelled by user request")
 
     create_notification(
         db,
@@ -1313,6 +1398,7 @@ def cancel_order(
         "Order Cancelled",
         f"{order.order_uid} has been cancelled.",
         has_action=True,
+        metadata={"order_uid": order.order_uid, "cancel_reason": "Order cancelled by user request"},
     )
     db.commit()
     return order

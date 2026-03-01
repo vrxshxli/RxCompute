@@ -50,6 +50,13 @@ class OrderHistoryScreen extends StatelessWidget {
                             Text(o.formattedDate, style: GoogleFonts.outfit(color: r.text3, fontSize: 11, fontWeight: FontWeight.w600, letterSpacing: 0.5)),
                             Text(o.formattedTotal, style: GoogleFonts.dmSerifDisplay(color: r.text1, fontSize: 18)),
                           ]),
+                          if (o.status == OrderStatus.cancelled && (o.cancelReason ?? '').trim().isNotEmpty) ...[
+                            const SizedBox(height: 8),
+                            Text(
+                              'Reason: ${o.cancelReason}',
+                              style: GoogleFonts.outfit(color: C.err, fontSize: 11),
+                            ),
+                          ],
                         ]),
                       ),
                     );

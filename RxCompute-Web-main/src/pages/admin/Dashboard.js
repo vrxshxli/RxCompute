@@ -23,7 +23,7 @@ function _toText(value, fallback = "") {
   return fallback;
 }
 
-export default function AdminDashboard() {
+export default function AdminDashboard({ onNavigate }) {
   const { user, token, apiBase } = useAuth();
   const [orders, setOrders] = useState([]);
   const [medicines, setMedicines] = useState([]);
@@ -183,7 +183,12 @@ export default function AdminDashboard() {
           <div className="glass" style={{ padding: 28, position: 'relative', overflow: 'hidden' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
               <span style={{ fontSize: 18, fontWeight: 700, color: '#111827' }}>Priority Actions</span>
-              <span style={{ fontSize: 13, color: B, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>View all <ArrowUpRight size={14} /></span>
+              <button
+                onClick={() => onNavigate?.("orders")}
+                style={{ fontSize: 13, color: B, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, background: 'transparent', border: 'none' }}
+              >
+                View all <ArrowUpRight size={14} />
+              </button>
             </div>
 
             <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
@@ -215,7 +220,12 @@ export default function AdminDashboard() {
           <div className="glass" style={{ padding: 28 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
               <span style={{ fontSize: 18, fontWeight: 700, color: '#111827' }}>Agent Statistics</span>
-              <span style={{ fontSize: 13, color: B, fontWeight: 600, cursor: 'pointer' }}>View all</span>
+              <button
+                onClick={() => onNavigate?.("agent-traces")}
+                style={{ fontSize: 13, color: B, fontWeight: 600, cursor: 'pointer', background: 'transparent', border: 'none' }}
+              >
+                View all
+              </button>
             </div>
 
             {/* Progress bar */}
@@ -256,7 +266,12 @@ export default function AdminDashboard() {
           <div className="glass-static" style={{ overflow: 'hidden' }}>
             <div style={{ padding: '20px 28px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span style={{ fontSize: 18, fontWeight: 700, color: '#111827' }}>Recent Orders</span>
-              <span style={{ fontSize: 13, color: B, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>View all <ArrowUpRight size={14} /></span>
+              <button
+                onClick={() => onNavigate?.("orders")}
+                style={{ fontSize: 13, color: B, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, background: 'transparent', border: 'none' }}
+              >
+                View all <ArrowUpRight size={14} />
+              </button>
             </div>
 
             {/* Column headers */}

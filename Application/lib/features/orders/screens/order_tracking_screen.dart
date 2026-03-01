@@ -141,6 +141,16 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
                     Text('Total', style: GoogleFonts.dmSerifDisplay(color: r.text1, fontSize: 20)),
                     Text(o.formattedTotal, style: GoogleFonts.dmSerifDisplay(color: r.text1, fontSize: 20)),
                   ]),
+                  if (o.status == OrderStatus.cancelled && (o.cancelReason ?? '').trim().isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'Cancellation reason: ${o.cancelReason}',
+                        style: GoogleFonts.outfit(color: C.err, fontSize: 12, fontWeight: FontWeight.w500),
+                      ),
+                    ),
+                  ],
                 ]),
               ),
               const SizedBox(height: 24),
@@ -179,6 +189,10 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
                       Mono(o.orderUid, color: r.text1),
                       const SizedBox(height: 4),
                       Text('${o.items.length} items · ${o.formattedTotal}', style: GoogleFonts.outfit(color: r.text2, fontSize: 13)),
+                      if (o.status == OrderStatus.cancelled && (o.cancelReason ?? '').trim().isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text('Reason: ${o.cancelReason}', style: GoogleFonts.outfit(color: C.err, fontSize: 11)),
+                      ],
                     ]),
                   ),
                   RxBadge(text: o.status.label, color: statusColor),

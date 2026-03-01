@@ -56,6 +56,7 @@ export default function AdminOrders() {
         last_status_updated_by_role: o.last_status_updated_by_role || null,
         last_status_updated_by_name: o.last_status_updated_by_name || null,
         last_status_updated_at: o.last_status_updated_at || null,
+        cancel_reason: o.cancel_reason || null,
         items: o.items || [],
       })),
     [orders, userMap],
@@ -140,6 +141,11 @@ export default function AdminOrders() {
                   <div style={{ fontSize:11, color:T.gray500, marginBottom:8 }}>
                     {o.pharmacy_approved_by_name ? `Pharmacy approved by ${o.pharmacy_approved_by_name}` : `${o.last_status_updated_by_role || "staff"}: ${o.last_status_updated_by_name || "-"}`}{" · "}
                     {new Date(o.pharmacy_approved_at || o.last_status_updated_at || Date.now()).toLocaleString()}
+                  </div>
+                ) : null}
+                {o.status === "cancelled" && o.cancel_reason ? (
+                  <div style={{ fontSize:11, color:T.red, marginBottom:8 }}>
+                    Reason: {o.cancel_reason}
                   </div>
                 ) : null}
                 <div style={{ display:"flex", gap:8, alignItems:"center" }}>

@@ -97,6 +97,7 @@ class OrderModel {
   final String? deliveryAddress;
   final double? deliveryLat;
   final double? deliveryLng;
+  final String? cancelReason;
   final List<OrderItemModel> items;
   final DateTime createdAt;
 
@@ -111,6 +112,7 @@ class OrderModel {
     this.deliveryAddress,
     this.deliveryLat,
     this.deliveryLng,
+    this.cancelReason,
     this.items = const [],
     required this.createdAt,
   });
@@ -126,6 +128,7 @@ class OrderModel {
         deliveryAddress: json['delivery_address'],
         deliveryLat: (json['delivery_lat'] as num?)?.toDouble(),
         deliveryLng: (json['delivery_lng'] as num?)?.toDouble(),
+        cancelReason: json['cancel_reason'],
         items: (json['items'] as List?)
                 ?.map((e) => OrderItemModel.fromJson(e))
                 .toList() ??

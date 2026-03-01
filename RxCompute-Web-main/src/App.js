@@ -109,7 +109,7 @@ function DashboardShell() {
   const renderPage = () => {
     if (isAdmin) {
       switch (page) {
-        case "dashboard": return <AdminDashboard />;
+        case "dashboard": return <AdminDashboard onNavigate={handleSelectPage} />;
         case "inventory": return <AdminInventory />;
         case "refill-alerts": return <AdminRefillAlerts />;
         case "orders": return <AdminOrders />;

@@ -52,6 +52,7 @@ class OrderOut(BaseModel):
     last_status_updated_by_role: str | None = None
     last_status_updated_by_name: str | None = None
     last_status_updated_at: datetime | None = None
+    cancel_reason: str | None = None
     items: list[OrderItemOut] = []
     created_at: datetime | None
     updated_at: datetime | None

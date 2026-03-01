@@ -14,6 +14,7 @@ export default function AdminAgentTraces() {
   const [agentFilter, setAgentFilter] = useState('all');
   const [agentOptions, setAgentOptions] = useState([]);
   const [search, setSearch] = useState('');
+  const [searchDebounced, setSearchDebounced] = useState('');
 
   const load = async () => {
     if (!token) return;
@@ -22,9 +23,9 @@ export default function AdminAgentTraces() {
       const qs = new URLSearchParams({
         page: String(page),
         page_size: String(pageSize),
-        agent_name: agentFilter,
       });
-      if (search.trim()) qs.set('search', search.trim());
+      if (agentFilter && agentFilter !== 'all') qs.set('agent_name', agentFilter);
+      if (searchDebounced.trim()) qs.set('search', searchDebounced.trim());
       const res = await fetch(`${apiBase}/notifications/agent-traces?${qs.toString()}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -58,8 +59,16 @@ export default function AdminAgentTraces() {
   };
 
   useEffect(() => {
+    const id = setTimeout(() => {
+      setPage(1);
+      setSearchDebounced(search);
+    }, 280);
+    return () => clearTimeout(id);
+  }, [search]);
+
+  useEffect(() => {
     load();
-  }, [token, apiBase, page, pageSize, agentFilter]);
+  }, [token, apiBase, page, pageSize, agentFilter, searchDebounced]);
 
   const renderOcrIndicators = (indicators) => {
     if (!indicators || typeof indicators !== 'object') return null;
@@ -100,11 +109,11 @@ export default function AdminAgentTraces() {
     <input
       value={search}
       onChange={(e)=>setSearch(e.target.value)}
-      onKeyDown={(e)=>{ if (e.key === "Enter") { setPage(1); load(); } }}
+      onKeyDown={(e)=>{ if (e.key === "Enter") { setPage(1); setSearchDebounced(search); } }}
       placeholder="Search trace text..."
       style={{padding:"10px 12px", borderRadius:8, border:"1px solid "+T.gray300, minWidth:220}}
     />
-    <Btn variant="secondary" size="sm" onClick={()=>{ setPage(1); load(); }}>{loading ? "Refreshing..." : "Refresh"}</Btn>
+    <Btn variant="secondary" size="sm" onClick={()=>{ setPage(1); setSearchDebounced(search); }}>{loading ? "Refreshing..." : "Refresh"}</Btn>
     <p style={{fontSize:12,color:T.gray400,marginTop:8}}>Showing {logs.length} of {total} traces</p>
   </div>
   {/* Trace cards instead of table */}
