@@ -269,7 +269,7 @@ def _evaluate_rules(
     strips = strips_count if (isinstance(strips_count, int) and strips_count > 0) else qty
 
     # RULE 0: Duplicate active medication order block.
-    days_remaining = _active_days_remaining_for_user_medication(db, user_id, med.id)
+    days_remaining = _active_days_remaining_for_user_medication(db, user_id, med.id, med.name)
     if days_remaining is not None and days_remaining > 0:
         reasoning = (
             f"Duplicate order blocked for user_id={user_id}, medicine='{name}'. "
@@ -285,7 +285,13 @@ def _evaluate_rules(
             detail={"days_remaining": days_remaining},
         )
     if days_remaining is None or days_remaining <= 0:
-        hist_days_remaining = _estimated_days_remaining_from_latest_delivery_history(db, user_id, med.id, med.package)
+        hist_days_remaining = _estimated_days_remaining_from_latest_delivery_history(
+            db,
+            user_id,
+            med.id,
+            med.package,
+            medicine_name=med.name,
+        )
         if hist_days_remaining is not None and hist_days_remaining > 0:
             reasoning = (
                 f"History-based duplicate order blocked for user_id={user_id}, medicine='{name}'. "
@@ -306,6 +312,7 @@ def _evaluate_rules(
         db,
         user_id,
         med.id,
+        medicine_name=med.name,
         ignore_order_ids=ignore_order_ids,
         current_order_id=current_order_id,
     )
@@ -344,6 +351,7 @@ def _evaluate_rules(
         db,
         user_id,
         med.id,
+        medicine_name=med.name,
         ignore_order_ids=ignore_order_ids,
         current_order_id=current_order_id,
     )
@@ -1040,10 +1048,29 @@ def _build_summary(blocks, warnings, approved) -> str:
     return "\n".join(parts)
 
 
-def _active_days_remaining_for_user_medication(db, user_id: int, medicine_id: int) -> int | None:
+def _active_days_remaining_for_user_medication(
+    db,
+    user_id: int,
+    medicine_id: int,
+    medicine_name: str | None = None,
+) -> int | None:
     if not user_id or not medicine_id:
         return None
     from models.user_medication import UserMedication
+
+    def _row_days_remaining(row) -> int:
+        now = datetime.now(timezone.utc)
+        # Use the freshest anchor when stock quantity changes were recently synced.
+        anchor = row.updated_at or row.created_at or now
+        if anchor.tzinfo is None:
+            anchor = anchor.replace(tzinfo=timezone.utc)
+        elapsed_days = max((now - anchor).days, 0)
+        freq = max(int(row.frequency_per_day or 1), 1)
+        qty = max(int(row.quantity_units or 0), 0)
+        remaining_units = max(qty - (elapsed_days * freq), 0)
+        if remaining_units <= 0:
+            return 0
+        return int(ceil(remaining_units / freq))
 
     row = (
         db.query(UserMedication)
@@ -1051,26 +1078,38 @@ def _active_days_remaining_for_user_medication(db, user_id: int, medicine_id: in
         .order_by(UserMedication.updated_at.desc(), UserMedication.created_at.desc())
         .first()
     )
-    if not row:
+    if row:
+        return _row_days_remaining(row)
+    if not medicine_name:
         return None
-    now = datetime.now(timezone.utc)
-    # Use the freshest anchor when stock quantity changes were recently synced.
-    anchor = row.updated_at or row.created_at or now
-    if anchor.tzinfo is None:
-        anchor = anchor.replace(tzinfo=timezone.utc)
-    elapsed_days = max((now - anchor).days, 0)
-    freq = max(int(row.frequency_per_day or 1), 1)
-    qty = max(int(row.quantity_units or 0), 0)
-    remaining_units = max(qty - (elapsed_days * freq), 0)
-    if remaining_units <= 0:
-        return 0
-    return int(ceil(remaining_units / freq))
+
+    # Fallback: if catalog has duplicate IDs/variants, compare by normalized medicine name.
+    candidates = (
+        db.query(UserMedication)
+        .filter(UserMedication.user_id == user_id)
+        .order_by(UserMedication.updated_at.desc(), UserMedication.created_at.desc())
+        .limit(120)
+        .all()
+    )
+    if not candidates:
+        return None
+    candidate_med_ids = [int(c.medicine_id) for c in candidates if c.medicine_id]
+    med_name_map = {}
+    if candidate_med_ids:
+        med_rows = db.query(Medicine).filter(Medicine.id.in_(candidate_med_ids)).all()
+        med_name_map = {m.id: (m.name or "") for m in med_rows}
+    for cand in candidates:
+        cand_name = (cand.custom_name or "").strip() or med_name_map.get(cand.medicine_id, "")
+        if _is_same_medicine_name(cand_name, medicine_name):
+            return _row_days_remaining(cand)
+    return None
 
 
 def _has_active_inflight_order_for_medicine(
     db,
     user_id: int,
     medicine_id: int,
+    medicine_name: str | None = None,
     ignore_order_ids: set[int] | None = None,
     current_order_id: int | None = None,
 ) -> Order | None:
@@ -1098,7 +1137,23 @@ def _has_active_inflight_order_for_medicine(
     if isinstance(current_order_id, int) and current_order_id > 0:
         # During pharmacy review, compare against already-existing older orders only.
         q = q.filter(Order.id < current_order_id)
-    return q.order_by(Order.created_at.desc()).first()
+    exact = q.order_by(Order.created_at.desc()).first()
+    if exact:
+        return exact
+    if not medicine_name:
+        return None
+
+    # Fallback by medicine-name equivalence for catalog duplicates/variants.
+    q2 = db.query(Order).filter(Order.user_id == user_id, Order.status.in_(active_statuses))
+    if ignore_order_ids:
+        q2 = q2.filter(~Order.id.in_(list(ignore_order_ids)))
+    if isinstance(current_order_id, int) and current_order_id > 0:
+        q2 = q2.filter(Order.id < current_order_id)
+    for order in q2.order_by(Order.created_at.desc()).limit(120).all():
+        for item in order.items:
+            if _is_same_medicine_name(item.name, medicine_name):
+                return order
+    return None
 
 
 def _extract_ignore_order_ids(user_message: str | None) -> set[int]:
@@ -1127,6 +1182,7 @@ def _latest_same_day_order_for_medicine(
     db,
     user_id: int,
     medicine_id: int,
+    medicine_name: str | None = None,
     ignore_order_ids: set[int] | None = None,
     current_order_id: int | None = None,
 ) -> Order | None:
@@ -1164,6 +1220,25 @@ def _latest_same_day_order_for_medicine(
             dt = dt.replace(tzinfo=timezone.utc)
         if dt.date() == today:
             return order
+    if not medicine_name:
+        return None
+    # Fallback by normalized item-name if medicine IDs differ but product is equivalent.
+    q2 = db.query(Order).filter(Order.user_id == user_id, Order.status.in_(allowed_statuses))
+    if ignore_order_ids:
+        q2 = q2.filter(~Order.id.in_(list(ignore_order_ids)))
+    if isinstance(current_order_id, int) and current_order_id > 0:
+        q2 = q2.filter(Order.id < current_order_id)
+    for order in q2.order_by(Order.created_at.desc()).limit(120).all():
+        dt = order.created_at or order.updated_at or order.last_status_updated_at
+        if not dt:
+            continue
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        if dt.date() != today:
+            continue
+        for item in order.items:
+            if _is_same_medicine_name(item.name, medicine_name):
+                return order
     return None
 
 
@@ -1172,10 +1247,41 @@ def _estimated_days_remaining_from_latest_delivery_history(
     user_id: int,
     medicine_id: int,
     package: str | None,
+    medicine_name: str | None = None,
 ) -> int | None:
     if not user_id or not medicine_id:
         return None
     # Use latest delivered order line when tracking row is missing.
+    def _remaining_days_for(order: Order, item: OrderItem, pack_text: str | None) -> int | None:
+        delivered_at = order.last_status_updated_at or order.updated_at or order.created_at
+        if not delivered_at:
+            return None
+        delivered_at = delivered_at if delivered_at.tzinfo else delivered_at.replace(tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
+        elapsed_days = max((now - delivered_at).days, 0)
+
+        dosage_txt = (item.dosage_instruction or "").lower()
+        freq = 1
+        tri = re.search(r"\b(\d+)\s*-\s*(\d+)\s*-\s*(\d+)\b", dosage_txt)
+        if tri:
+            freq = max(int(tri.group(1)) + int(tri.group(2)) + int(tri.group(3)), 1)
+        else:
+            xday = re.search(r"\b(\d+)\s*(x|times?)\s*(/|per)?\s*day\b", dosage_txt)
+            if xday:
+                freq = max(int(xday.group(1)), 1)
+            elif "twice" in dosage_txt or "bd" in dosage_txt:
+                freq = 2
+            elif "thrice" in dosage_txt or "tid" in dosage_txt:
+                freq = 3
+
+        units_per_pack = _extract_units_per_strip(pack_text)
+        packs = max(int(item.strips_count or item.quantity or 1), 1)
+        supplied_units = max(packs * units_per_pack, packs)
+        remaining_units = max(supplied_units - (elapsed_days * freq), 0)
+        if remaining_units <= 0:
+            return 0
+        return int(ceil(remaining_units / freq))
+
     row = (
         db.query(Order, OrderItem)
         .join(OrderItem, OrderItem.order_id == Order.id)
@@ -1187,37 +1293,90 @@ def _estimated_days_remaining_from_latest_delivery_history(
         .order_by(Order.last_status_updated_at.desc(), Order.updated_at.desc(), Order.created_at.desc())
         .first()
     )
-    if not row:
+    if row:
+        order, item = row
+        return _remaining_days_for(order, item, package)
+    if not medicine_name:
         return None
-    order, item = row
-    delivered_at = order.last_status_updated_at or order.updated_at or order.created_at
-    if not delivered_at:
+
+    # Fallback by name-equivalence if historical order used different medicine_id.
+    delivered_rows = (
+        db.query(Order, OrderItem)
+        .join(OrderItem, OrderItem.order_id == Order.id)
+        .filter(Order.user_id == user_id, Order.status == OrderStatus.delivered)
+        .order_by(Order.last_status_updated_at.desc(), Order.updated_at.desc(), Order.created_at.desc())
+        .limit(200)
+        .all()
+    )
+    if not delivered_rows:
         return None
-    delivered_at = delivered_at if delivered_at.tzinfo else delivered_at.replace(tzinfo=timezone.utc)
-    now = datetime.now(timezone.utc)
-    elapsed_days = max((now - delivered_at).days, 0)
+    med_ids = [int(item.medicine_id) for _, item in delivered_rows if item.medicine_id]
+    med_map = {}
+    if med_ids:
+        med_rows = db.query(Medicine).filter(Medicine.id.in_(med_ids)).all()
+        med_map = {m.id: m for m in med_rows}
+    for order, item in delivered_rows:
+        item_med = med_map.get(item.medicine_id)
+        candidate_name = item.name or (item_med.name if item_med else "")
+        if not _is_same_medicine_name(candidate_name, medicine_name):
+            continue
+        pack_txt = (item_med.package if item_med else None) or package
+        return _remaining_days_for(order, item, pack_txt)
+    return None
 
-    dosage_txt = (item.dosage_instruction or "").lower()
-    freq = 1
-    tri = re.search(r"\b(\d+)\s*-\s*(\d+)\s*-\s*(\d+)\b", dosage_txt)
-    if tri:
-        freq = max(int(tri.group(1)) + int(tri.group(2)) + int(tri.group(3)), 1)
-    else:
-        xday = re.search(r"\b(\d+)\s*(x|times?)\s*(/|per)?\s*day\b", dosage_txt)
-        if xday:
-            freq = max(int(xday.group(1)), 1)
-        elif "twice" in dosage_txt or "bd" in dosage_txt:
-            freq = 2
-        elif "thrice" in dosage_txt or "tid" in dosage_txt:
-            freq = 3
 
-    units_per_pack = _extract_units_per_strip(package)
-    packs = max(int(item.strips_count or item.quantity or 1), 1)
-    supplied_units = max(packs * units_per_pack, packs)
-    remaining_units = max(supplied_units - (elapsed_days * freq), 0)
-    if remaining_units <= 0:
-        return 0
-    return int(ceil(remaining_units / freq))
+def _is_same_medicine_name(a: str | None, b: str | None) -> bool:
+    na = _medicine_name_fingerprint(a or "")
+    nb = _medicine_name_fingerprint(b or "")
+    if not na or not nb:
+        return False
+    if na == nb:
+        return True
+    ta = na.split()
+    tb = nb.split()
+    if not ta or not tb:
+        return False
+    if ta[0] == tb[0] and len(ta[0]) >= 4:
+        return True
+    overlap = set(ta) & set(tb)
+    return len(overlap) >= 2
+
+
+def _medicine_name_fingerprint(name: str) -> str:
+    tokens = _normalize_text(name).split()
+    stop = {
+        "mg",
+        "mcg",
+        "ml",
+        "g",
+        "tablette",
+        "tabletten",
+        "tablet",
+        "tablets",
+        "capsule",
+        "capsules",
+        "caps",
+        "st",
+        "filmtabletten",
+        "retardkapseln",
+        "kapseln",
+        "tropfen",
+        "saft",
+        "spray",
+        "losung",
+    }
+    cleaned = []
+    for t in tokens:
+        if not t or t in stop:
+            continue
+        if re.fullmatch(r"\d+", t):
+            continue
+        if re.fullmatch(r"\d+(mg|mcg|ml|g|iu)", t):
+            continue
+        if len(t) < 3:
+            continue
+        cleaned.append(t)
+    return " ".join(cleaned[:4])
 
 
 def _langfuse_output(data: dict):

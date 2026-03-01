@@ -165,6 +165,54 @@ def _publish_safety_trace_for_admins(
         )
 
 
+def _publish_admin_automation_trace_for_admins(
+    db: Session,
+    title: str,
+    body: str,
+    metadata: dict,
+) -> None:
+    admins = db.query(User).filter(User.role == "admin").all()
+    for admin in admins:
+        create_notification(
+            db,
+            admin.id,
+            NotificationType.safety,
+            title,
+            body,
+            has_action=True,
+            dedupe_window_minutes=0,
+            metadata=metadata,
+        )
+
+
+def _duplicate_rejection_user_message(safety: dict) -> str | None:
+    rows = safety.get("safety_results", []) or []
+    duplicate_rules = {
+        "duplicate_active_medication",
+        "duplicate_from_order_history",
+        "duplicate_same_day_order",
+        "duplicate_active_order_inflight",
+    }
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("rule", "")) not in duplicate_rules:
+            continue
+        med_name = str(row.get("medicine_name") or "This medicine").strip()
+        detail = row.get("detail") if isinstance(row.get("detail"), dict) else {}
+        days = detail.get("days_remaining")
+        if isinstance(days, int) and days > 0:
+            return (
+                f"{med_name} is still available from your previous order "
+                f"(about {days} day(s) remaining). Please finish current stock before reordering."
+            )
+        return (
+            f"{med_name} is already present in your active medicine cycle. "
+            "Please complete the current medicine before placing the same order again."
+        )
+    return None
+
+
 def _publish_scheduler_alert(
     db: Session,
     assigned_node: str | None,
@@ -345,7 +393,11 @@ def _auto_review_pending_for_pharmacy(db: Session, pharmacy_user: User) -> None:
             f"Auto review for {order.order_uid}",
             trace_meta,
         )
-        reason = (safety.get("safety_summary") or "").strip() or "Rejected by safety agent"
+        reason = (
+            _duplicate_rejection_user_message(safety)
+            or (safety.get("safety_summary") or "").strip()
+            or "Rejected by safety agent"
+        )
         now = datetime.utcnow()
         order_owner = db.query(User).filter(User.id == order.user_id).first()
 
@@ -484,8 +536,10 @@ def _auto_progress_admin_logistics(db: Session) -> None:
             order.id or 0,
         )
 
+    admins = db.query(User).filter(User.role == "admin").all()
     changed = False
     for order in sorted(in_flight, key=_prio_key):
+        prev_status = order.status
         required_wait = min_stage_wait_seconds.get(order.status, 0)
         if _age_seconds(order) < required_wait:
             continue
@@ -496,6 +550,30 @@ def _auto_progress_admin_logistics(db: Session) -> None:
         order.last_status_updated_by_role = "admin_automation"
         order.last_status_updated_by_name = "System Automation"
         order.last_status_updated_at = now
+        trace_meta = {
+            "agent_name": "admin_automation_agent",
+            "phase": "admin_auto_progress",
+            "order_id": order.id,
+            "order_uid": order.order_uid,
+            "target_user_id": order.user_id,
+            "triggered_by_role": "admin",
+            "previous_status": prev_status.value if hasattr(prev_status, "value") else str(prev_status),
+            "new_status": nxt.value if hasattr(nxt, "value") else str(nxt),
+            "is_refill_order": bool((order.order_uid or "").upper().startswith("RFL-")),
+            "priority_rank": stage_rank.get(prev_status, 9),
+            "wait_seconds_required": required_wait,
+        }
+        for admin in admins:
+            create_notification(
+                db,
+                admin.id,
+                NotificationType.safety,
+                "Agent Trace: Admin Automation",
+                f"{order.order_uid} moved {trace_meta['previous_status']} -> {trace_meta['new_status']}",
+                has_action=True,
+                dedupe_window_minutes=0,
+                metadata=trace_meta,
+            )
         changed = True
         if nxt == OrderStatus.delivered:
             _restock_user_medications_on_refill_delivery(db, order)
@@ -860,7 +938,11 @@ def update_order_status(
                 verify_trace_meta,
             )
             if safety_verify.get("has_blocks"):
-                auto_reject_reason = safety_verify.get("safety_summary", "") or "Rejected by safety agent checks"
+                auto_reject_reason = (
+                    _duplicate_rejection_user_message(safety_verify)
+                    or safety_verify.get("safety_summary", "")
+                    or "Rejected by safety agent checks"
+                )
                 new_status = OrderStatus.cancelled
     elif current_user.role == "admin":
         allowed_for_admin = {
