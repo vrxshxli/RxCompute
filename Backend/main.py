@@ -14,6 +14,13 @@ from database import Base, engine
 from migrate import migrate as run_migrations
 from dependencies import get_current_user
 from models.user import User
+from saftery_policies_agents.ai_config import (
+    LANGFUSE_ENABLED,
+    LANGFUSE_HOST,
+    LANGFUSE_PUBLIC_KEY,
+    configure_langfuse_decorators,
+    get_langfuse,
+)
 from routers import (
     auth_router,
     users_router,
@@ -85,6 +92,9 @@ app = FastAPI(
     description="AI-Powered Pharmacy Management System — Backend API",
     version="1.0.0",
 )
+
+# Ensure @observe decorator runtime has Langfuse env values.
+configure_langfuse_decorators()
 
 logs_path = os.path.join(os.path.dirname(__file__), "logs")
 os.makedirs(logs_path, exist_ok=True)
@@ -177,3 +187,27 @@ def debug_error_logs(
         return {"lines": tail, "path": error_log_file}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Could not read error logs: {e}")
+
+
+@app.get("/debug/langfuse-health", tags=["Debug"])
+def debug_langfuse_health(current_user: User = Depends(get_current_user)):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    masked_pk = ""
+    if LANGFUSE_PUBLIC_KEY:
+        masked_pk = f"{LANGFUSE_PUBLIC_KEY[:8]}...{LANGFUSE_PUBLIC_KEY[-6:]}"
+    client_ok = False
+    client_error = ""
+    try:
+        client = get_langfuse()
+        client_ok = client is not None
+    except Exception as exc:
+        client_error = str(exc)
+    return {
+        "enabled": bool(LANGFUSE_ENABLED),
+        "host": LANGFUSE_HOST,
+        "public_key_masked": masked_pk,
+        "client_initialized": client_ok,
+        "client_error": client_error,
+        "note": "If enabled=true and client_initialized=true but traces are missing, trigger an agent flow and check project/environment keys.",
+    }
