@@ -4,9 +4,24 @@ import { StatusPill, AgentBadge } from '../../components/shared';
 import {
   ShoppingCart, Bell, Package, Zap, Activity,
   ArrowUpRight, Shield, TrendingUp, Clock,
-  CheckCircle, AlertTriangle, ExternalLink, Users
+  CheckCircle, AlertTriangle, Users
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+
+function _toText(value, fallback = "") {
+  if (value == null) return fallback;
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) return value.map((v) => _toText(v, "")).filter(Boolean).join(" | ") || fallback;
+  if (typeof value === "object") {
+    if (value.msg) return String(value.msg);
+    try {
+      return JSON.stringify(value);
+    } catch (_) {
+      return fallback;
+    }
+  }
+  return fallback;
+}
 
 export default function AdminDashboard() {
   const { user, token, apiBase } = useAuth();
@@ -14,6 +29,7 @@ export default function AdminDashboard() {
   const [medicines, setMedicines] = useState([]);
   const [webhookLogs, setWebhookLogs] = useState([]);
   const [users, setUsers] = useState([]);
+  const [agentTraces, setAgentTraces] = useState([]);
 
   useEffect(() => {
     if (!token) return;
@@ -42,9 +58,18 @@ export default function AdminDashboard() {
           const data = await usersRes.json();
           setUsers(Array.isArray(data) ? data : []);
         }
+        const tracesRes = await fetch(`${apiBase}/notifications/agent-traces?page=1&page_size=40`, { headers });
+        if (tracesRes.ok) {
+          const data = await tracesRes.json();
+          setAgentTraces(Array.isArray(data?.items) ? data.items : []);
+        } else {
+          setAgentTraces([]);
+        }
       } catch (_) {}
     };
     load();
+    const id = setInterval(load, 12000);
+    return () => clearInterval(id);
   }, [token, apiBase]);
 
   const firstName = user?.name?.split(' ')[0] || 'Admin';
@@ -80,12 +105,30 @@ export default function AdminDashboard() {
   const ordersToday = mappedOrders.filter((o) => (o.created_at || '').slice(0, 10) === todayStr).length;
   const activePatients = new Set(mappedOrders.map((o) => o.patient_name)).size;
   const agentActions = webhookLogs.length;
-  const liveActivity = webhookLogs.map((w) => ({
-    id: w.id,
-    agent_name: "order_agent",
-    action: `${w.event_type.replace(/_/g, ' ')} ${w.response_status && w.response_status >= 400 ? 'FAILED' : 'sent'} (${w.response_status || 'n/a'})`,
-    created_at: w.created_at,
-  }));
+  const liveActivity = useMemo(() => {
+    if (agentTraces.length) {
+      return agentTraces.map((t) => {
+        const meta = t?.metadata || {};
+        const title = _toText(t?.title, "Trace");
+        const body = _toText(t?.body, "");
+        const phase = _toText(meta?.phase, "");
+        return {
+          id: t.id,
+          agent_name: _toText(t.agent_name || meta.agent_name, "agent"),
+          action: [title, body, phase ? `(phase: ${phase})` : ""].filter(Boolean).join(" "),
+          created_at: t.created_at,
+          status_hint: `${title} ${body}`.toLowerCase(),
+        };
+      });
+    }
+    return webhookLogs.map((w) => ({
+      id: w.id,
+      agent_name: "order_agent",
+      action: `${w.event_type.replace(/_/g, ' ')} ${w.response_status && w.response_status >= 400 ? 'FAILED' : 'sent'} (${w.response_status || 'n/a'})`,
+      created_at: w.created_at,
+      status_hint: `${w.event_type || ""} ${w.response_status || ""}`.toLowerCase(),
+    }));
+  }, [agentTraces, webhookLogs]);
 
   /* palette — strictly blue + orange + white */
   const B = '#1A6BB5';   /* brand blue */
@@ -272,31 +315,36 @@ export default function AdminDashboard() {
               ))}
             </div>
 
-            {/* CTA Banner (like "Setup training for next week") */}
-            <div style={{
-              background: `linear-gradient(135deg, ${B}, ${B}dd)`,
-              borderRadius: 20, padding: 28, color: 'white', position: 'relative', overflow: 'hidden', flex: 1,
-              display: 'flex', flexDirection: 'column', justifyContent: 'center',
-            }}>
-              {/* Decorative circles */}
-              <div style={{ position: 'absolute', top: -20, right: -20, width: 100, height: 100, borderRadius: '50%', background: 'rgba(255,255,255,0.1)' }} />
-              <div style={{ position: 'absolute', bottom: -30, right: 40, width: 70, height: 70, borderRadius: '50%', background: 'rgba(255,255,255,0.08)' }} />
-              <div style={{ position: 'absolute', top: 20, right: 60, width: 40, height: 40, borderRadius: '50%', background: `${O}40` }} />
-
-              <div style={{ position: 'relative', zIndex: 1 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.7)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>Don't Forget</div>
-                <div style={{ fontSize: 22, fontWeight: 800, lineHeight: 1.3, marginBottom: 16 }}>
-                  Review Langfuse<br />agent traces
-                </div>
-                <button style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 8,
-                  background: 'rgba(255,255,255,0.2)', backdropFilter: 'blur(8px)',
-                  border: '1px solid rgba(255,255,255,0.3)', borderRadius: 10,
-                  padding: '10px 20px', color: 'white', fontSize: 13, fontWeight: 600,
-                  cursor: 'pointer',
-                }}>
-                  <ExternalLink size={14} /> Open Langfuse
-                </button>
+            {/* Live feed card replacing Langfuse CTA */}
+            <div className="glass" style={{ padding: 18, minHeight: 230, display: 'flex', flexDirection: 'column' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                <Activity size={16} color={B} />
+                <span style={{ fontSize: 16, fontWeight: 700, color: '#111827' }}>Live Agent Activity</span>
+                <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#10b981', animation: 'pulse2 2.4s infinite', marginLeft: 4 }} />
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, overflowY: 'auto' }}>
+                {liveActivity.slice(0, 6).map((log) => {
+                  const hint = String(log.status_hint || "").toLowerCase();
+                  const isBlocked = hint.includes('blocked') || hint.includes('rejected') || hint.includes('failed') || hint.includes('429');
+                  const isDone = hint.includes('delivered') || hint.includes('verified') || hint.includes('complete');
+                  const dotColor = isBlocked ? '#dc2626' : isDone ? '#10b981' : B;
+                  return (
+                    <div key={`mini-${log.id}`} style={{ display: 'flex', gap: 10, border: '1px solid rgba(0,0,0,0.05)', borderRadius: 10, padding: '10px 12px' }}>
+                      <div style={{ width: 8, height: 8, borderRadius: '50%', background: dotColor, marginTop: 6, flexShrink: 0 }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 3 }}>
+                          <AgentBadge agent={log.agent_name} />
+                          <span style={{ fontSize: 10, color: '#9ca3af', fontFamily: 'monospace', marginLeft: 'auto' }}>
+                            {new Date(log.created_at).toLocaleTimeString('en-GB', { hour12: false })}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: 12, color: '#374151', lineHeight: 1.4 }}>
+                          {_toText(log.action)}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -313,9 +361,10 @@ export default function AdminDashboard() {
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 12, padding: '8px 28px 24px' }}>
             {liveActivity.slice(0, 9).map(log => {
-              const isBlocked = log.action.includes('BLOCKED');
-              const isCreated = log.action.includes('Created');
-              const dotColor = isBlocked ? '#dc2626' : isCreated ? '#10b981' : B;
+              const hint = String(log.status_hint || "").toLowerCase();
+              const isBlocked = hint.includes('blocked') || hint.includes('rejected') || hint.includes('failed') || hint.includes('429');
+              const isDone = hint.includes('delivered') || hint.includes('verified') || hint.includes('complete');
+              const dotColor = isBlocked ? '#dc2626' : isDone ? '#10b981' : B;
 
               return (
                 <div key={log.id} style={{

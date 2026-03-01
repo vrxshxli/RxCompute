@@ -16,8 +16,7 @@ export default function Sidebar({ items, active, onSelect, role, collapsed, onTo
   return (
     <div style={{
       width: showMini ? 68 : 256,
-      minHeight: isMobile ? "calc(100vh - 44px)" : "100vh",
-      maxHeight: isMobile ? "calc(100vh - 44px)" : "none",
+      height: "calc(100vh - 44px)",
       background: T.white,
       borderRight: `1px solid ${T.gray200}`,
       display: "flex",
@@ -25,11 +24,12 @@ export default function Sidebar({ items, active, onSelect, role, collapsed, onTo
       transition: "width 0.25s ease",
       overflow: "hidden",
       flexShrink: 0,
-      position: isMobile ? "fixed" : "static",
-      top: isMobile ? 44 : "auto",
+      position: isMobile ? "fixed" : "sticky",
+      top: 44,
       left: 0,
       zIndex: 70,
       boxShadow: isMobile ? "0 10px 28px rgba(0,0,0,.18)" : "none",
+      alignSelf: "flex-start",
     }}>
       {/* Header */}
       <div style={{ padding: showMini ? "20px 16px" : "20px 20px", borderBottom: `1px solid ${T.gray200}`, display: "flex", alignItems: "center", justifyContent: showMini ? "center" : "space-between" }}>
@@ -54,7 +54,7 @@ export default function Sidebar({ items, active, onSelect, role, collapsed, onTo
       )}
 
       {/* Nav links */}
-      <nav style={{ flex: 1, padding: "8px 0" }}>
+      <nav style={{ flex: 1, padding: "8px 0", overflowY: "auto" }}>
         {items.map(item => {
           const isActive = active === item.key;
           const Icon = item.icon;

@@ -789,7 +789,7 @@ def _verify_prescription_with_gemini_ocr(medicine_name: str, rx_file: str) -> di
     text_norm = _normalize_text(extracted_text)
     medicine_tokens = [t for t in _normalize_text(medicine_name).split() if len(t) >= 4 and not re.fullmatch(r"\d+", t)]
     medicine_token_hits = sum(1 for t in medicine_tokens if t in text_norm)
-    medicine_name_present = medicine_token_hits >= (2 if len(medicine_tokens) >= 2 else 1)
+    medicine_name_present = _prescription_mentions_medicine(extracted_text, medicine_name)
     rx_markers = {"rx", "prescription", "doctor", "patient", "clinic", "hospital"}
     marker_hits = sum(1 for k in rx_markers if k in text_norm)
     is_prescription = marker_hits >= 2
@@ -945,17 +945,85 @@ def _looks_like_medical_text(text: str) -> bool:
 
 def _prescription_mentions_medicine(text: str, medicine_name: str) -> bool:
     t = _normalize_text(text)
-    name_tokens = [tok for tok in _normalize_text(medicine_name).split() if len(tok) >= 4 and tok not in {"tablet", "tablets", "capsule", "capsules"}]
+    name_tokens = [
+        tok
+        for tok in _normalize_text(medicine_name).split()
+        if len(tok) >= 4 and tok not in {"tablet", "tablets", "capsule", "capsules"}
+    ]
     if not name_tokens:
         return False
-    # Require at least one strong token and preferably first brand token.
+
+    # 1) Exact token pathway (existing strict behavior).
     first = name_tokens[0]
-    if first not in t:
-        return False
     hit_count = sum(1 for tok in name_tokens if tok in t)
-    if len(name_tokens) >= 2:
-        return hit_count >= 2
-    return hit_count >= 1
+    if first in t and (hit_count >= 2 if len(name_tokens) >= 2 else hit_count >= 1):
+        return True
+
+    # 2) Fragment-tolerant pathway for OCR-broken words.
+    #    Example: "para c ol" should still match "paracetamol" if close enough.
+    condensed_text = _condense_alnum(text)
+    if not condensed_text:
+        return False
+
+    # Try full medicine phrase first, then strong tokens.
+    full_name = _condense_alnum(medicine_name)
+    candidates = [full_name] if len(full_name) >= 6 else []
+    candidates.extend([_condense_alnum(tok) for tok in name_tokens if len(_condense_alnum(tok)) >= 4])
+    candidates = list(dict.fromkeys([c for c in candidates if c]))
+    if not candidates:
+        return False
+
+    fuzzy_hits = 0
+    for cand in candidates:
+        if _ocr_fuzzy_contains(condensed_text, cand):
+            fuzzy_hits += 1
+    if len(candidates) >= 2:
+        return fuzzy_hits >= 1
+    return fuzzy_hits >= 1
+
+
+def _condense_alnum(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", (text or "").lower())
+
+
+def _levenshtein(a: str, b: str) -> int:
+    if a == b:
+        return 0
+    if not a:
+        return len(b)
+    if not b:
+        return len(a)
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            ins = cur[j - 1] + 1
+            dele = prev[j] + 1
+            rep = prev[j - 1] + (0 if ca == cb else 1)
+            cur.append(min(ins, dele, rep))
+        prev = cur
+    return prev[-1]
+
+
+def _ocr_fuzzy_contains(condensed_text: str, token: str) -> bool:
+    if not condensed_text or not token:
+        return False
+    if token in condensed_text:
+        return True
+    n = len(token)
+    if n < 4:
+        return False
+    # Scan local windows for approximate match (OCR handwriting/noise tolerant).
+    # Keep thresholds strict enough to avoid random-image approvals.
+    max_dist = 2 if n <= 8 else 3
+    min_w = max(4, n - 2)
+    max_w = min(len(condensed_text), n + 2)
+    for w in range(min_w, max_w + 1):
+        for i in range(0, len(condensed_text) - w + 1):
+            chunk = condensed_text[i : i + w]
+            if _levenshtein(chunk, token) <= max_dist:
+                return True
+    return False
 
 
 def _prescription_mentions_dosage(text: str, dosage_instruction: str) -> bool:

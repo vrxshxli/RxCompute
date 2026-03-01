@@ -46,7 +46,7 @@ const ADMIN_NAV = [
   { key: "inventory", label: "Inventory", icon: Package },
   { key: "refill-alerts", label: "Refill Alerts", icon: Bell },
   { key: "orders", label: "Orders", icon: ShoppingCart },
-  { key: "safety-events", label: "Safety Events", icon: AlertTriangle },
+  { key: "safety-events", label: "Agent Workflow", icon: AlertTriangle },
   { key: "safety-rules", label: "Safety Rules", icon: Shield },
   { key: "agent-traces", label: "Agent Traces", icon: Search },
   { key: "webhook-logs", label: "Webhook Logs", icon: Link2 },
@@ -198,7 +198,7 @@ function DashboardShell() {
         </div>
       </div>
       {/* Body */}
-      <div style={{ display: "flex" }}>
+      <div style={{ display: "flex", alignItems: "flex-start", minHeight: "calc(100vh - 44px)" }}>
         <Sidebar items={nav} active={page} onSelect={handleSelectPage} role={role} collapsed={collapsed} onToggle={() => setCollapsed(!collapsed)} isMobile={isMobile} />
         {isMobile && !collapsed ? (
           <div
