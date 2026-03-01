@@ -178,7 +178,7 @@ def _publish_demand_forecast_alerts(db: Session, result: ForecastResult, forecas
     Emit demand-forecast agent traces/alerts for admin and pharmacy dashboards.
     """
     admins = db.query(User).filter(User.role == "admin").all()
-    pharmacists = db.query(User).filter(User.role == "pharmacy_store").all()
+    pharmacists = db.query(User).filter(User.role.in_(["pharmacy_store", "pharmacy"])).all()
     critical_or_high = result.critical_count + result.high_count
     trace_title = "Demand Forecast Agent Trace"
     trace_body = (

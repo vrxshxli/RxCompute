@@ -21,7 +21,7 @@ from demand_forecast_agent.demand_forecast_agent import (
 )
 
 router = APIRouter(prefix="/demand-forecast", tags=["Demand Forecasting Agent"])
-STAFF = {"admin", "pharmacy_store", "warehouse"}
+STAFF = {"admin", "pharmacy_store", "pharmacy", "warehouse"}
 
 
 @router.get("/")

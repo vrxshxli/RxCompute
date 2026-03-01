@@ -15,6 +15,8 @@ export default function AdminAgentTraces() {
   const [agentOptions, setAgentOptions] = useState([]);
   const [search, setSearch] = useState('');
   const [searchDebounced, setSearchDebounced] = useState('');
+  const [runInfo, setRunInfo] = useState(null);
+  const [runningForecast, setRunningForecast] = useState(false);
 
   const load = async () => {
     if (!token) return;
@@ -70,6 +72,35 @@ export default function AdminAgentTraces() {
     load();
   }, [token, apiBase, page, pageSize, agentFilter, searchDebounced]);
 
+  const runDemandForecast = async () => {
+    if (!token || runningForecast) return;
+    setRunningForecast(true);
+    setRunInfo(null);
+    try {
+      const res = await fetch(`${apiBase}/demand-forecast/reorder-alerts?days=14`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setRunInfo({
+          ok: false,
+          msg: data?.detail || 'Demand forecast run failed',
+        });
+        return;
+      }
+      setRunInfo({
+        ok: true,
+        msg: `Forecast done. Critical: ${Number(data?.critical || 0)} · High: ${Number(data?.high || 0)} · Alerts: ${Array.isArray(data?.reorder_alerts) ? data.reorder_alerts.length : 0}`,
+      });
+      setPage(1);
+      await load();
+    } catch (_) {
+      setRunInfo({ ok: false, msg: 'Network error while running demand forecast' });
+    } finally {
+      setRunningForecast(false);
+    }
+  };
+
   const renderOcrIndicators = (indicators) => {
     if (!indicators || typeof indicators !== 'object') return null;
     const pairs = Object.entries(indicators);
@@ -114,7 +145,15 @@ export default function AdminAgentTraces() {
       style={{padding:"10px 12px", borderRadius:8, border:"1px solid "+T.gray300, minWidth:220}}
     />
     <Btn variant="secondary" size="sm" onClick={()=>{ setPage(1); setSearchDebounced(search); }}>{loading ? "Refreshing..." : "Refresh"}</Btn>
+    <Btn variant="secondary" size="sm" onClick={runDemandForecast} disabled={runningForecast}>
+      {runningForecast ? "Running Forecast..." : "Run Demand Forecast"}
+    </Btn>
     <p style={{fontSize:12,color:T.gray400,marginTop:8}}>Showing {logs.length} of {total} traces</p>
+    {runInfo ? (
+      <p style={{fontSize:12,color:runInfo.ok ? T.green : T.red,marginTop:4}}>
+        {runInfo.msg}
+      </p>
+    ) : null}
   </div>
   {/* Trace cards instead of table */}
   <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(320px, 1fr))", gap:12 }}>
