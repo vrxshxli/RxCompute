@@ -3,7 +3,11 @@ Simple migration script — adds missing columns to existing tables.
 Safe to run multiple times (checks before altering).
 """
 
+import os
+import sys
+import time
 from sqlalchemy import text, inspect
+from sqlalchemy.exc import OperationalError
 from database import engine, Base
 from database import SessionLocal
 
@@ -27,8 +31,30 @@ def get_existing_columns(conn, table_name: str) -> set:
     return {col["name"] for col in insp.get_columns(table_name)}
 
 
+def _is_db_slots_busy_error(exc: Exception) -> bool:
+    return "remaining connection slots are reserved for roles with the SUPERUSER attribute" in str(exc)
+
+
+def _connect_with_retry():
+    retries = max(int(os.getenv("MIGRATION_CONNECT_RETRIES", "8")), 1)
+    delay_s = max(float(os.getenv("MIGRATION_CONNECT_RETRY_DELAY_SECONDS", "2")), 0.2)
+    last_exc = None
+    for attempt in range(1, retries + 1):
+        try:
+            return engine.connect()
+        except OperationalError as exc:
+            last_exc = exc
+            if not _is_db_slots_busy_error(exc) or attempt >= retries:
+                break
+            print(f"  · DB slots busy (attempt {attempt}/{retries}), retrying in {delay_s:.1f}s...")
+            time.sleep(delay_s)
+    if last_exc:
+        raise last_exc
+    return engine.connect()
+
+
 def migrate():
-    with engine.connect() as conn:
+    with _connect_with_retry() as conn:
         lock_acquired = False
         try:
             # Prevent concurrent migration execution across multiple startup workers.
@@ -283,4 +309,12 @@ def _ensure_sample_inventory_data():
 
 
 if __name__ == "__main__":
-    migrate()
+    try:
+        migrate()
+    except OperationalError as exc:
+        # During deploy, Postgres slot spikes can be temporary. Avoid hard-failing rollout.
+        if _is_db_slots_busy_error(exc):
+            print("⚠ Migration skipped: database connection slots are currently exhausted.")
+            print("  Tip: reduce Render web workers / concurrent jobs, then rerun migration.")
+            sys.exit(0)
+        raise
