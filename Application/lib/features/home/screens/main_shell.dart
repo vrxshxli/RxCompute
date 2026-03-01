@@ -574,7 +574,8 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
 
   Future<void> _speak(String text) async {
     if (text.trim().isEmpty) return;
-    final normalized = text.trim().toLowerCase();
+    final speakable = _normalizeSpeechText(text);
+    final normalized = speakable.trim().toLowerCase();
     final now = DateTime.now();
     if (_lastSpokenText == normalized &&
         _lastSpokenAt != null &&
@@ -585,8 +586,22 @@ class _MS extends State<MainShell> with WidgetsBindingObserver {
     _lastSpokenAt = now;
     try {
       await _tts.setLanguage(_voiceLanguage);
-      await _tts.speak(text);
+      await _tts.speak(speakable);
     } catch (_) {}
+  }
+
+  String _normalizeSpeechText(String input) {
+    var out = input;
+    final moneyWord = _voiceLanguage == 'hi-IN'
+        ? 'रुपये'
+        : _voiceLanguage == 'mr-IN'
+            ? 'रुपये'
+            : 'rupees';
+    out = out.replaceAll('€', ' $moneyWord ');
+    out = out.replaceAll(RegExp(r'\beur\b', caseSensitive: false), moneyWord);
+    out = out.replaceAll(RegExp(r'\beuro(s)?\b', caseSensitive: false), moneyWord);
+    out = out.replaceAll(RegExp(r'\s+'), ' ').trim();
+    return out;
   }
 
   void _setVoiceLanguage(String code) {

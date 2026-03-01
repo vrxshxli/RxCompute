@@ -429,6 +429,80 @@ def _auto_review_pending_for_pharmacy(db: Session, pharmacy_user: User) -> None:
         db.commit()
 
 
+def _auto_progress_admin_logistics(db: Session) -> None:
+    """
+    Admin logistics automation:
+      - Priority order: refill orders first, then deeper pipeline stages
+        (dispatched > packed > picking > verified), then FIFO by created_at.
+      - Progresses one step at a time per eligible order.
+    """
+    stage_rank = {
+        OrderStatus.dispatched: 0,
+        OrderStatus.packed: 1,
+        OrderStatus.picking: 2,
+        OrderStatus.verified: 3,
+    }
+    in_flight = (
+        db.query(Order)
+        .filter(Order.status.in_([OrderStatus.verified, OrderStatus.picking, OrderStatus.packed, OrderStatus.dispatched]))
+        .all()
+    )
+    if not in_flight:
+        return
+
+    now = datetime.utcnow()
+
+    def _age_seconds(order: Order) -> int:
+        dt = order.last_status_updated_at or order.updated_at or order.created_at or now
+        if dt.tzinfo is not None:
+            dt = dt.replace(tzinfo=None)
+        return max(int((now - dt).total_seconds()), 0)
+
+    # Wait windows per stage to avoid unrealistic instant delivery.
+    min_stage_wait_seconds = {
+        OrderStatus.verified: 0,
+        OrderStatus.picking: 60,
+        OrderStatus.packed: 120,
+        OrderStatus.dispatched: 180,
+    }
+    next_stage = {
+        OrderStatus.verified: OrderStatus.picking,
+        OrderStatus.picking: OrderStatus.packed,
+        OrderStatus.packed: OrderStatus.dispatched,
+        OrderStatus.dispatched: OrderStatus.delivered,
+    }
+
+    def _prio_key(order: Order):
+        is_refill = 0 if (order.order_uid or "").upper().startswith("RFL-") else 1
+        created = order.created_at or now
+        if created.tzinfo is not None:
+            created = created.replace(tzinfo=None)
+        return (
+            is_refill,
+            stage_rank.get(order.status, 9),
+            created,
+            order.id or 0,
+        )
+
+    changed = False
+    for order in sorted(in_flight, key=_prio_key):
+        required_wait = min_stage_wait_seconds.get(order.status, 0)
+        if _age_seconds(order) < required_wait:
+            continue
+        nxt = next_stage.get(order.status)
+        if not nxt:
+            continue
+        order.status = nxt
+        order.last_status_updated_by_role = "admin_automation"
+        order.last_status_updated_by_name = "System Automation"
+        order.last_status_updated_at = now
+        changed = True
+        if nxt == OrderStatus.delivered:
+            _restock_user_medications_on_refill_delivery(db, order)
+    if changed:
+        db.commit()
+
+
 @router.get("/", response_model=list[OrderOut])
 def list_orders(
     current_user: User = Depends(get_current_user),
@@ -452,6 +526,7 @@ def list_orders(
         return db.query(Order).order_by(Order.created_at.desc()).limit(300).all()
     if current_user.role in STAFF_ROLES:
         if current_user.role == "admin":
+            _auto_progress_admin_logistics(db)
             # Admin logistics board starts after pharmacy safety verification.
             # Pending orders are handled in pharmacy dashboard first.
             return (

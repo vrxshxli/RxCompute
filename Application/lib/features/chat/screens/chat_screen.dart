@@ -205,9 +205,19 @@ class _CS extends State<ChatScreen> {
 
   Future<void> _speakText(String text) async {
     if (text.trim().isEmpty) return;
+    final speakable = _normalizeSpeechText(text);
     try {
-      await _tts.speak(text);
+      await _tts.speak(speakable);
     } catch (_) {}
+  }
+
+  String _normalizeSpeechText(String input) {
+    var out = input;
+    out = out.replaceAll('€', ' rupees ');
+    out = out.replaceAll(RegExp(r'\beur\b', caseSensitive: false), 'rupees');
+    out = out.replaceAll(RegExp(r'\beuro(s)?\b', caseSensitive: false), 'rupees');
+    out = out.replaceAll(RegExp(r'\s+'), ' ').trim();
+    return out;
   }
 
   @override

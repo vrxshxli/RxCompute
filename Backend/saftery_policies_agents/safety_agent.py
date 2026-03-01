@@ -1048,16 +1048,17 @@ def _active_days_remaining_for_user_medication(db, user_id: int, medicine_id: in
     row = (
         db.query(UserMedication)
         .filter(UserMedication.user_id == user_id, UserMedication.medicine_id == medicine_id)
-        .order_by(UserMedication.created_at.desc())
+        .order_by(UserMedication.updated_at.desc(), UserMedication.created_at.desc())
         .first()
     )
     if not row:
         return None
     now = datetime.now(timezone.utc)
-    created = row.created_at or now
-    if created.tzinfo is None:
-        created = created.replace(tzinfo=timezone.utc)
-    elapsed_days = max((now - created).days, 0)
+    # Use the freshest anchor when stock quantity changes were recently synced.
+    anchor = row.updated_at or row.created_at or now
+    if anchor.tzinfo is None:
+        anchor = anchor.replace(tzinfo=timezone.utc)
+    elapsed_days = max((now - anchor).days, 0)
     freq = max(int(row.frequency_per_day or 1), 1)
     qty = max(int(row.quantity_units or 0), 0)
     remaining_units = max(qty - (elapsed_days * freq), 0)
@@ -1154,7 +1155,7 @@ def _latest_same_day_order_for_medicine(
         q = q.filter(~Order.id.in_(list(ignore_order_ids)))
     if isinstance(current_order_id, int) and current_order_id > 0:
         q = q.filter(Order.id < current_order_id)
-    candidates = q.order_by(Order.created_at.desc()).limit(5).all()
+    candidates = q.order_by(Order.created_at.desc()).limit(100).all()
     for order in candidates:
         dt = order.created_at or order.updated_at or order.last_status_updated_at
         if not dt:
