@@ -6,18 +6,27 @@ export default function PharmacyExceptions() {
   const { token, apiBase } = useAuth();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
   useEffect(() => {
     if (!token) return;
     const load = async () => {
       setLoading(true);
+      setError("");
       try {
         const res = await fetch(`${apiBase}/exceptions/queue?limit=120`, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        if (!res.ok) return;
+        if (!res.ok) {
+          const txt = await res.text();
+          setError(txt || "Unable to load exception queue");
+          setRows([]);
+          return;
+        }
         const data = await res.json();
         setRows(Array.isArray(data) ? data : []);
-      } catch (_) {}
+      } catch (_) {
+        setError("Network error while loading exception queue");
+      }
       finally { setLoading(false); }
     };
     load();
@@ -38,6 +47,7 @@ export default function PharmacyExceptions() {
   return (<div><PageHeader title="Exceptions" subtitle="Manual review"/>
   <div style={{display:"flex",flexDirection:"column",gap:12}}>
     {loading ? <div style={{fontSize:12,color:T.gray500}}>Loading exception queue...</div> : null}
+    {error ? <div style={{fontSize:12,color:T.red,background:`${T.red}12`,border:`1px solid ${T.red}33`,borderRadius:8,padding:"10px 12px"}}>{error}</div> : null}
     {exceptions.map((x,i)=>
       <div key={i} style={{background:T.white,border:"1px solid "+T.gray200,borderLeft:"4px solid "+((String(x.severity||"").toLowerCase()==="critical" || String(x.severity||"").toLowerCase()==="high")?T.red:T.yellow),borderRadius:10,padding:16}}>
         <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}><span style={{fontWeight:600,color:T.gray900}}>{x.exception_type || "Exception"}</span><StatusPill status={(x.severity||"medium").toLowerCase()} size="xs"/></div>

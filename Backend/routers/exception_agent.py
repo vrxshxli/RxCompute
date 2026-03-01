@@ -18,7 +18,7 @@ from models.notification import Notification, NotificationType
 from exception_agent.exception_agent import handle_order_exceptions
 
 router = APIRouter(prefix="/exceptions", tags=["Exception Agent"])
-STAFF = {"admin", "pharmacy_store", "warehouse"}
+STAFF = {"admin", "pharmacy_store", "pharmacy", "warehouse"}
 
 
 class ExceptionRequest(BaseModel):
@@ -146,7 +146,7 @@ def exception_queue(
     """
     Pharmacy/admin exception queue derived from exception-agent safety notifications.
     """
-    if current_user.role not in {"admin", "pharmacy_store"}:
+    if current_user.role not in {"admin", "pharmacy_store", "pharmacy"}:
         raise HTTPException(status_code=403, detail="Staff only")
     rows = (
         db.query(Notification)
