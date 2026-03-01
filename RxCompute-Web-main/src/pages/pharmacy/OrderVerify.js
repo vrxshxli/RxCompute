@@ -63,7 +63,7 @@ export default function PharmacyVerify() {
           strips_count: it.strips_count || 1,
           prescription_file: it.prescription_file || null,
         })),
-        message: `Pharmacy verify order ${order.order_uid}`,
+        message: `Pharmacy verify order ${order.order_uid} ignore_order_id=${order.id} current_order_id=${order.id}`,
       };
       const res = await fetch(`${apiBase}/safety/check`, {
         method: 'POST',
@@ -94,6 +94,7 @@ export default function PharmacyVerify() {
 
   const setStatus = async (status) => {
     if (!token || !o) return;
+    if (o.status !== "pending") return;
     await fetch(`${apiBase}/orders/${o.id}/status`, {
       method: "PUT",
       headers: {
@@ -124,7 +125,12 @@ export default function PharmacyVerify() {
     </div>
     <div>
       <div style={{background:T.navy900,borderRadius:10,padding:20,color:T.gray300,marginBottom:16}}><div style={{fontWeight:600,fontSize:14,color:T.white,marginBottom:16,display:"flex",alignItems:"center",gap:8}}><Zap size={16} color={T.yellow}/>AI Analysis</div>{[{i:!safetyReady||checkingSafety?"..":(safetyBlocked?"NO":"OK"),t:`Prescription: ${((o.items || []).some(it=>it.rx_required)) ? "required" : "not required"}`,c:!safetyReady||checkingSafety?T.yellow:(safetyBlocked?T.red:T.green)},{i:"OK",t:`Items: ${(o.items || []).length}`,c:T.green},{i:"OK",t:`Current status: ${o.status}`,c:T.green},{i:checkingSafety?"..":(safetyBlocked?"XX":">>"),t:checkingSafety?"Recommendation: CHECKING":"Recommendation: " + (safetyBlocked ? "REJECT" : "APPROVE"),c:safetyBlocked?T.red:T.blue}].map((x,j)=><div key={j} style={{display:"flex",gap:10,marginBottom:12,fontSize:13}}><span style={{color:x.c,fontWeight:700}}>{x.i}</span><span style={{color:x.c}}>{x.t}</span></div>)}{safetySummary ? <div style={{fontSize:11,color:safetyBlocked?T.red:T.gray300,marginTop:6,whiteSpace:"pre-wrap"}}>{safetySummary}</div> : null}{Array.isArray(safetyResults) && safetyResults.length ? <div style={{marginTop:8,fontSize:11,color:T.gray200,maxHeight:140,overflow:"auto"}}>{safetyResults.slice(0,6).map((r,idx)=><div key={`sr-${idx}`} style={{marginBottom:6}}>{(r.status || '').toUpperCase()} · {r.medicine_name || '-'} · {r.rule || '-'}{r.message ? `: ${r.message}` : ''}</div>)}</div> : null}<Btn variant="ghost" size="sm" style={{color:T.blue,marginTop:8}}><ExternalLink size={12}/>Langfuse</Btn></div>
-      <div style={{display:"flex",flexDirection:"column",gap:8}}><Btn variant="success" size="md" style={{width:"100%",justifyContent:"center"}} disabled={checkingSafety || !safetyReady || safetyBlocked} onClick={() => setStatus("verified")}><CheckCircle size={16}/>Approve</Btn><Btn variant="secondary" size="md" style={{width:"100%",justifyContent:"center",color:T.yellow}} disabled={checkingSafety || !safetyReady || safetyBlocked} onClick={() => setStatus("verified")}><AlertTriangle size={16}/>Approve with Note</Btn><Btn variant="secondary" size="md" style={{width:"100%",justifyContent:"center",color:T.red}} onClick={() => setStatus("cancelled")}><XCircle size={16}/>Reject</Btn></div>
+      <div style={{display:"flex",flexDirection:"column",gap:8}}>
+        {o.status !== "pending" ? <div style={{fontSize:12,color:T.gray400,textAlign:"center"}}>Verification allowed only for pending orders.</div> : null}
+        <Btn variant="success" size="md" style={{width:"100%",justifyContent:"center"}} disabled={o.status !== "pending" || checkingSafety || !safetyReady || safetyBlocked} onClick={() => setStatus("verified")}><CheckCircle size={16}/>Approve</Btn>
+        <Btn variant="secondary" size="md" style={{width:"100%",justifyContent:"center",color:T.yellow}} disabled={o.status !== "pending" || checkingSafety || !safetyReady || safetyBlocked} onClick={() => setStatus("verified")}><AlertTriangle size={16}/>Approve with Note</Btn>
+        <Btn variant="secondary" size="md" style={{width:"100%",justifyContent:"center",color:T.red}} disabled={o.status !== "pending"} onClick={() => setStatus("cancelled")}><XCircle size={16}/>Reject</Btn>
+      </div>
     </div>
   </div></div>);
 }

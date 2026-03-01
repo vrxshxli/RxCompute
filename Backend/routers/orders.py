@@ -1,6 +1,6 @@
 import uuid
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from math import atan2, cos, radians, sin, sqrt
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -339,6 +339,193 @@ def _restock_user_medications_on_refill_delivery(db: Session, order: Order) -> N
             )
 
 
+def _normalize_medicine_name(name: str | None) -> str:
+    raw = (name or "").lower()
+    tokens = re.sub(r"[^a-z0-9]+", " ", raw).split()
+    if not tokens:
+        return ""
+    stop = {
+        "mg",
+        "mcg",
+        "ml",
+        "g",
+        "tablet",
+        "tablets",
+        "capsule",
+        "capsules",
+        "caps",
+        "tab",
+        "st",
+        "filmtabletten",
+        "retardkapseln",
+        "kapseln",
+    }
+    kept = []
+    for t in tokens:
+        if t in stop:
+            continue
+        if re.fullmatch(r"\d+", t):
+            continue
+        if re.fullmatch(r"\d+(mg|mcg|ml|g|iu)", t):
+            continue
+        if len(t) < 3:
+            continue
+        kept.append(t)
+    return " ".join(kept[:4])
+
+
+def _same_medicine_name(a: str | None, b: str | None) -> bool:
+    na = _normalize_medicine_name(a)
+    nb = _normalize_medicine_name(b)
+    if not na or not nb:
+        return False
+    if na == nb:
+        return True
+    ta = na.split()
+    tb = nb.split()
+    if not ta or not tb:
+        return False
+    if ta[0] == tb[0] and len(ta[0]) >= 4:
+        return True
+    return len(set(ta) & set(tb)) >= 2
+
+
+def _estimate_freq_per_day_for_guard(dosage_instruction: str | None) -> int:
+    txt = (dosage_instruction or "").lower().strip()
+    if not txt:
+        return 1
+    tri = re.search(r"\b(\d+)\s*-\s*(\d+)\s*-\s*(\d+)\b", txt)
+    if tri:
+        return max(int(tri.group(1)) + int(tri.group(2)) + int(tri.group(3)), 1)
+    xday = re.search(r"\b(\d+)\s*(x|times?)\s*(/|per)?\s*day\b", txt)
+    if xday:
+        return max(int(xday.group(1)), 1)
+    if "twice" in txt or "bd" in txt:
+        return 2
+    if "thrice" in txt or "tid" in txt:
+        return 3
+    return 1
+
+
+def _estimate_units_per_pack_for_guard(package: str | None) -> int:
+    txt = (package or "").lower()
+    m = re.search(r"\b(\d+)\s*(st|tabs?|tablets?|caps?(?:ules?)?)\b", txt)
+    if m:
+        return max(int(m.group(1)), 1)
+    n = re.search(r"\b(\d+)\b", txt)
+    if n:
+        return max(int(n.group(1)), 1)
+    return 20
+
+
+def _strict_duplicate_block_reason_for_order(db: Session, order: Order) -> str | None:
+    if not order or not order.user_id:
+        return None
+    incoming_names = []
+    for it in order.items:
+        if (it.name or "").strip():
+            incoming_names.append(it.name.strip())
+    if not incoming_names:
+        return None
+
+    now = datetime.utcnow()
+    active_statuses = {
+        OrderStatus.pending,
+        OrderStatus.confirmed,
+        OrderStatus.verified,
+        OrderStatus.picking,
+        OrderStatus.packed,
+        OrderStatus.dispatched,
+    }
+
+    prior_rows = (
+        db.query(Order, OrderItem)
+        .join(OrderItem, OrderItem.order_id == Order.id)
+        .filter(
+            Order.user_id == order.user_id,
+            Order.id != order.id,
+            Order.status != OrderStatus.cancelled,
+        )
+        .order_by(Order.created_at.desc())
+        .limit(500)
+        .all()
+    )
+    prior_med_ids = [int(item.medicine_id) for _, item in prior_rows if item.medicine_id]
+    med_rows = db.query(Medicine).filter(Medicine.id.in_(prior_med_ids)).all() if prior_med_ids else []
+    prior_med_map = {m.id: m for m in med_rows}
+
+    for req_name in incoming_names:
+        for prior_order, prior_item in prior_rows:
+            prior_med = prior_med_map.get(prior_item.medicine_id)
+            prior_name = prior_item.name or (prior_med.name if prior_med else "")
+            if not _same_medicine_name(req_name, prior_name):
+                continue
+            prior_status = prior_order.status
+            prior_uid = prior_order.order_uid or f"Order #{prior_order.id}"
+            if prior_status in active_statuses:
+                status_txt = prior_status.value if hasattr(prior_status, "value") else str(prior_status)
+                return (
+                    f"{req_name} already has an active order ({prior_uid}, {status_txt}). "
+                    "Please complete current cycle before re-ordering."
+                )
+            if prior_status == OrderStatus.delivered:
+                delivered_at = prior_order.last_status_updated_at or prior_order.updated_at or prior_order.created_at
+                if delivered_at and delivered_at.tzinfo is not None:
+                    delivered_at = delivered_at.replace(tzinfo=None)
+                if delivered_at is None:
+                    continue
+                elapsed_days = max((now - delivered_at).days, 0)
+                freq = _estimate_freq_per_day_for_guard(prior_item.dosage_instruction)
+                units_per_pack = _estimate_units_per_pack_for_guard(prior_med.package if prior_med else None)
+                packs = max(int(prior_item.strips_count or prior_item.quantity or 1), 1)
+                supplied_units = max(packs * units_per_pack, packs)
+                remaining_units = max(supplied_units - (elapsed_days * freq), 0)
+                if remaining_units > 0:
+                    days_remaining = max(int((remaining_units + freq - 1) // freq), 1)
+                    return (
+                        f"{req_name} still appears active from your previous delivered order "
+                        f"({prior_uid}) with about {days_remaining} day(s) remaining."
+                    )
+                # Conservative same-day lock even when dosage is ambiguous.
+                if elapsed_days == 0:
+                    return (
+                        f"{req_name} was delivered today in {prior_uid}. "
+                        "Same-day repeat order is blocked for patient safety."
+                    )
+
+    tracking_rows = (
+        db.query(UserMedication)
+        .filter(UserMedication.user_id == order.user_id)
+        .order_by(UserMedication.updated_at.desc(), UserMedication.created_at.desc())
+        .limit(200)
+        .all()
+    )
+    tracking_med_ids = [int(r.medicine_id) for r in tracking_rows if r.medicine_id]
+    tracking_meds = db.query(Medicine).filter(Medicine.id.in_(tracking_med_ids)).all() if tracking_med_ids else []
+    tracking_med_map = {m.id: m for m in tracking_meds}
+    for req_name in incoming_names:
+        for row in tracking_rows:
+            row_name = (row.custom_name or "").strip() or (
+                tracking_med_map.get(row.medicine_id).name if tracking_med_map.get(row.medicine_id) else ""
+            )
+            if not _same_medicine_name(req_name, row_name):
+                continue
+            anchor = row.updated_at or row.created_at or now
+            if anchor.tzinfo is not None:
+                anchor = anchor.replace(tzinfo=None)
+            elapsed_days = max((now - anchor).days, 0)
+            freq = max(int(row.frequency_per_day or 1), 1)
+            qty = max(int(row.quantity_units or 0), 0)
+            remaining_units = max(qty - (elapsed_days * freq), 0)
+            if remaining_units > 0:
+                days_remaining = max(int((remaining_units + freq - 1) // freq), 1)
+                return (
+                    f"{req_name} is still present in active medication tracking "
+                    f"(about {days_remaining} day(s) remaining)."
+                )
+    return None
+
+
 def _auto_review_pending_for_pharmacy(db: Session, pharmacy_user: User) -> None:
     pharmacy_node = _resolve_pharmacy_node_for_user(pharmacy_user, db)
     pending_orders = (
@@ -448,6 +635,32 @@ def _auto_review_pending_for_pharmacy(db: Session, pharmacy_user: User) -> None:
             if order_owner:
                 run_in_background(send_push_to_token, order_owner.push_token, "Order Rejected During Auto Review", stock_reason, order_owner.id)
                 run_in_background(send_safety_rejection_email, order_owner.email, order.order_uid, stock_reason)
+            changed = True
+            continue
+
+        strict_duplicate_reason = _strict_duplicate_block_reason_for_order(db, order)
+        if strict_duplicate_reason:
+            order.status = OrderStatus.cancelled
+            order.last_status_updated_by_role = pharmacy_user.role
+            order.last_status_updated_by_name = pharmacy_user.name or pharmacy_user.email or f"User #{pharmacy_user.id}"
+            order.last_status_updated_at = now
+            create_notification(
+                db,
+                order.user_id,
+                NotificationType.safety,
+                "Safety Agent Rejected Order",
+                strict_duplicate_reason,
+                has_action=True,
+            )
+            if order_owner:
+                run_in_background(
+                    send_push_to_token,
+                    order_owner.push_token,
+                    "Safety Agent Rejected Order",
+                    strict_duplicate_reason,
+                    order_owner.id,
+                )
+                run_in_background(send_safety_rejection_email, order_owner.email, order.order_uid, strict_duplicate_reason)
             changed = True
             continue
 
@@ -944,6 +1157,11 @@ def update_order_status(
                     or "Rejected by safety agent checks"
                 )
                 new_status = OrderStatus.cancelled
+            else:
+                strict_duplicate_reason = _strict_duplicate_block_reason_for_order(db, order)
+                if strict_duplicate_reason:
+                    auto_reject_reason = strict_duplicate_reason
+                    new_status = OrderStatus.cancelled
     elif current_user.role == "admin":
         allowed_for_admin = {
             OrderStatus.verified,
@@ -1056,4 +1274,45 @@ def update_order_status(
             "updated_by_role": current_user.role,
         },
     )
+    return order
+
+
+@router.put("/{order_id}/cancel", response_model=OrderOut)
+def cancel_order(
+    order_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Allow users to cancel their own in-progress orders from chat/voice."""
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    is_staff = current_user.role in STAFF_ROLES
+    if not is_staff and order.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="You can cancel only your own order")
+
+    terminal_statuses = {OrderStatus.delivered, OrderStatus.cancelled}
+    non_cancellable_statuses = {OrderStatus.dispatched}
+    if order.status in terminal_statuses:
+        raise HTTPException(status_code=400, detail=f"Order already {order.status.value}")
+    if order.status in non_cancellable_statuses:
+        raise HTTPException(status_code=400, detail="Order is already dispatched and cannot be cancelled")
+
+    order.status = OrderStatus.cancelled
+    order.last_status_updated_by_role = current_user.role if is_staff else "user"
+    order.last_status_updated_by_name = current_user.name or current_user.email or f"User #{current_user.id}"
+    order.last_status_updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(order)
+
+    create_notification(
+        db,
+        order.user_id,
+        NotificationType.order,
+        "Order Cancelled",
+        f"{order.order_uid} has been cancelled.",
+        has_action=True,
+    )
+    db.commit()
     return order

@@ -44,6 +44,11 @@ class OrderRepository {
     return OrderModel.fromJson(res.data);
   }
 
+  Future<OrderModel> cancelMyOrder(int orderId) async {
+    final res = await _api.dio.put('${ApiConfig.orders}/$orderId/cancel');
+    return OrderModel.fromJson(res.data);
+  }
+
   Future<OrderModel> createOrderViaAgent({
     required List<Map<String, dynamic>> items,
     String? paymentMethod,

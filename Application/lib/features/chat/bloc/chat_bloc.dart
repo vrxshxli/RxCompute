@@ -113,6 +113,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   _ChatLang _lang = _ChatLang.hi;
   _ChatStage _stage = _ChatStage.language;
   String _chatScope = 'guest';
+  int? _lastPlacedOrderId;
 
   ChatBloc() : super(const ChatState()) {
     on<LoadChatEvent>(_onLoad);
@@ -132,6 +133,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
 
     if (saved.isNotEmpty) {
       final restored = saved.map(_decodeMessage).whereType<ChatMessage>().toList();
+      _lastPlacedOrderId = _extractLastPlacedOrderId(restored);
       if (restored.isEmpty) {
         final initial = [
           ChatMessage(
@@ -182,6 +184,33 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   Future<void> _onSend(SendMessageEvent event, Emitter<ChatState> emit) async {
     final text = event.text.trim();
     if (text.isEmpty) return;
+    final lowered = text.toLowerCase();
+
+    if (_isNewChatCommand(lowered)) {
+      _resetDraft();
+      final now = DateTime.now();
+      final fresh = [
+        ChatMessage(
+          id: '${now.millisecondsSinceEpoch}',
+          isUser: false,
+          text: _t(
+            hi: 'नई चैट शुरू हो गई। दवा का नाम भेजें या वॉइस से बोलें।',
+            en: 'Started a new chat. Type medicine name or use voice.',
+          ),
+          timestamp: now,
+        ),
+      ];
+      final next = state.copyWith(
+        messages: fresh,
+        isTyping: false,
+        requiresPrescriptionUpload: false,
+        awaitingLanguage: false,
+        languageCode: _lang.code,
+      );
+      emit(next);
+      await _persistChat(next.messages);
+      return;
+    }
 
     final userMsg = ChatMessage(
       id: '${DateTime.now().millisecondsSinceEpoch}',
@@ -326,6 +355,47 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     await Future.delayed(const Duration(milliseconds: 700));
     final l = text.toLowerCase().trim();
     final now = DateTime.now();
+
+    if (_isCancelOrderCommand(l)) {
+      if (_lastPlacedOrderId == null) {
+        return [
+          ChatMessage(
+            id: '${now.millisecondsSinceEpoch}',
+            isUser: false,
+            text: _t(
+              hi: 'Cancel करने के लिए कोई recent order नहीं मिला। पहले order place करें।',
+              en: 'No recent order found to cancel. Please place an order first.',
+            ),
+            timestamp: now,
+          ),
+        ];
+      }
+      try {
+        final cancelled = await _orderRepo.cancelMyOrder(_lastPlacedOrderId!);
+        return [
+          ChatMessage(
+            id: '${now.millisecondsSinceEpoch}',
+            isUser: false,
+            text: _t(
+              hi: 'ठीक है, order cancel कर दिया गया: ${cancelled.orderUid}',
+              en: 'Done. Your order has been cancelled: ${cancelled.orderUid}',
+            ),
+            timestamp: now,
+            type: ChatMessageType.confirmed,
+            order: cancelled,
+          ),
+        ];
+      } catch (e) {
+        return [
+          ChatMessage(
+            id: '${now.millisecondsSinceEpoch}',
+            isUser: false,
+            text: _toReadableError(e),
+            timestamp: now,
+          ),
+        ];
+      }
+    }
 
     if (_stage == _ChatStage.language) {
       if (l == '1' || l.contains('hindi') || l == 'hi') {
@@ -517,6 +587,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       if (l.contains('cod') || l.contains('cash')) {
         _draftPaymentMethod = 'cod';
         final order = await _placeOrder();
+        _lastPlacedOrderId = order.id;
         _resetDraft();
         return [
           ChatMessage(
@@ -546,6 +617,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         );
         await Future.delayed(const Duration(milliseconds: 900));
         final order = await _placeOrder();
+        _lastPlacedOrderId = order.id;
         _resetDraft();
         return [
           processing,
@@ -902,6 +974,36 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
 
   String _normalizeQuery(String q) {
     return q.toLowerCase().replaceAll(RegExp(r'[^a-z0-9\s]'), ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
+  }
+
+  bool _isCancelOrderCommand(String text) {
+    final t = text.trim();
+    return t == 'cancel' ||
+        t == 'cancel order' ||
+        t.contains('cancel my order') ||
+        t.contains('order cancel') ||
+        t.contains('ऑर्डर कैंसल') ||
+        t.contains('order radd') ||
+        t.contains('order radd karo');
+  }
+
+  bool _isNewChatCommand(String text) {
+    final t = text.trim();
+    return t == 'new chat' ||
+        t == 'start new chat' ||
+        t == 'clear chat' ||
+        t.contains('नई चैट') ||
+        t.contains('नया चैट') ||
+        t.contains('new conversation');
+  }
+
+  int? _extractLastPlacedOrderId(List<ChatMessage> messages) {
+    for (final m in messages.reversed) {
+      final o = m.order;
+      if (o == null) continue;
+      return o.id;
+    }
+    return null;
   }
 }
 

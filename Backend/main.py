@@ -1,8 +1,10 @@
 import os
 import json
 import tempfile
+import logging
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import firebase_admin
@@ -10,6 +12,8 @@ from firebase_admin import credentials
 
 from database import Base, engine
 from migrate import migrate as run_migrations
+from dependencies import get_current_user
+from models.user import User
 from routers import (
     auth_router,
     users_router,
@@ -82,6 +86,17 @@ app = FastAPI(
     version="1.0.0",
 )
 
+logs_path = os.path.join(os.path.dirname(__file__), "logs")
+os.makedirs(logs_path, exist_ok=True)
+error_log_file = os.path.join(logs_path, "errors.log")
+error_logger = logging.getLogger("rxcompute.errors")
+if not error_logger.handlers:
+    error_logger.setLevel(logging.ERROR)
+    fh = logging.FileHandler(error_log_file, encoding="utf-8")
+    fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    error_logger.addHandler(fh)
+    error_logger.propagate = False
+
 # CORS — support local web dashboard + deployed clients.
 raw_origins = os.getenv(
     "CORS_ORIGINS",
@@ -132,6 +147,33 @@ os.makedirs(uploads_path, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=uploads_path), name="uploads")
 
 
+@app.middleware("http")
+async def _capture_unhandled_errors(request: Request, call_next):
+    try:
+        return await call_next(request)
+    except Exception as exc:  # pragma: no cover
+        error_logger.exception("Unhandled server error on %s %s: %s", request.method, request.url.path, exc)
+        return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
+
 @app.get("/", tags=["Health"])
 def health_check():
     return {"status": "ok", "service": "RxCompute API", "version": "1.0.0"}
+
+
+@app.get("/debug/error-logs", tags=["Debug"])
+def debug_error_logs(
+    lines: int = Query(80, ge=1, le=500),
+    current_user: User = Depends(get_current_user),
+):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    if not os.path.exists(error_log_file):
+        return {"lines": [], "path": error_log_file}
+    try:
+        with open(error_log_file, "r", encoding="utf-8", errors="replace") as f:
+            all_lines = f.readlines()
+        tail = [ln.rstrip("\n") for ln in all_lines[-lines:]]
+        return {"lines": tail, "path": error_log_file}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Could not read error logs: {e}")
