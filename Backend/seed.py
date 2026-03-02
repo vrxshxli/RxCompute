@@ -1,9 +1,10 @@
 """Seed the database with initial medicine data."""
 
+import os
+import time
+from sqlalchemy.exc import OperationalError
 from database import SessionLocal, Base, engine
 from models.medicine import Medicine
-
-Base.metadata.create_all(bind=engine)
 
 MEDICINES = [
     {"name": "Panthenol Spray, 46,3 mg/g", "pzn": "04020784", "price": 16.95, "package": "130 g", "stock": 72, "rx_required": False, "description": "Schaumspray zur Anwendung auf der Haut."},
@@ -33,19 +34,36 @@ MEDICINES = [
 
 
 def seed():
-    db = SessionLocal()
-    try:
-        existing = db.query(Medicine).count()
-        if existing > 0:
-            print(f"Database already has {existing} medicines — skipping seed.")
-            return
+    retries = max(int(os.getenv("SEED_CONNECT_RETRIES", "8")), 1)
+    delay_s = max(float(os.getenv("SEED_CONNECT_RETRY_DELAY_SECONDS", "2")), 0.2)
+    db = None
+    for attempt in range(1, retries + 1):
+        try:
+            Base.metadata.create_all(bind=engine)
+            db = SessionLocal()
+            existing = db.query(Medicine).count()
+            if existing > 0:
+                print(f"Database already has {existing} medicines — skipping seed.")
+                return
 
-        for m in MEDICINES:
-            db.add(Medicine(**m))
-        db.commit()
-        print(f"Seeded {len(MEDICINES)} medicines.")
-    finally:
-        db.close()
+            for m in MEDICINES:
+                db.add(Medicine(**m))
+            db.commit()
+            print(f"Seeded {len(MEDICINES)} medicines.")
+            return
+        except OperationalError as exc:
+            busy = "remaining connection slots are reserved for roles with the SUPERUSER attribute" in str(exc)
+            if not busy or attempt >= retries:
+                if busy:
+                    print("⚠ Seed skipped: database connection slots are currently exhausted.")
+                    return
+                raise
+            print(f"  · DB slots busy for seed (attempt {attempt}/{retries}), retrying in {delay_s:.1f}s...")
+            time.sleep(delay_s)
+        finally:
+            if db is not None:
+                db.close()
+                db = None
 
 
 if __name__ == "__main__":
